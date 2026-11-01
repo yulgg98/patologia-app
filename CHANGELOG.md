@@ -5,6 +5,22 @@ Cada entrada indica la fecha, qué se cambió y por qué. Los códigos como "C-1
 
 ## 2026-11-01
 
+### CORS estricto y documentación Swagger de la API (D-19)
+
+**Qué se cambió:**
+- **CORS** (`backend/config/settings.py`): se quita `CORS_ALLOW_ALL_ORIGINS = DEBUG`. Ahora solo se aceptan los orígenes de `CORS_ALLOWED_ORIGINS`, también en desarrollo; si la variable no está en el `.env`, se permite el frontend de desarrollo (`http://localhost:5173` y `http://127.0.0.1:5173`).
+- **Bloqueo con 403** (`backend/config/origenes.py`, nuevo): `OrigenPermitidoMiddleware`, antes de `CorsMiddleware`, responde 403 (`"Origen no permitido: …"`) a las peticiones a `/api/` con una cabecera `Origin` que no es la del propio servidor ni una de `CORS_ALLOWED_ORIGINS`, sin ejecutar la vista. Las peticiones sin `Origin` (Postman, `curl`) no cambian.
+- **Swagger** (`drf-spectacular` y `drf-spectacular-sidecar`, nuevos en `requirements.txt`):
+  - `backend/config/documentacion.py` (nuevo): `/api/docs/` (Swagger UI, con los archivos servidos por Django) y `/api/schema/` (OpenAPI 3). Se ven sin sesión; los endpoints siguen pidiendo el token, que se pega en "Authorize". Solo responden si `DOCUMENTACION_API` está activa (por defecto, igual que `DEBUG`); si no, 404.
+  - `settings.py`: `drf_spectacular` y `drf_spectacular_sidecar` en `INSTALLED_APPS`, `DEFAULT_SCHEMA_CLASS` y `SPECTACULAR_SETTINGS` (título, descripción, versión). `config/urls.py`: las dos rutas.
+  - Para que el esquema salga completo y sin avisos: `@extend_schema` en `CambiarPasswordView`, `LogoutView` (`accounts/views.py`) y `OpcionesView` (`informes/views.py`, con `OpcionSerializer` y `OpcionesSerializer` solo para la documentación), y tipos de retorno en los `get_…` de `informes/serializers.py` y `foro/serializers.py`. No cambia ninguna respuesta.
+- **Cypress** (`scripts/e2e.mjs`): el backend de las pruebas recibe `CORS_ALLOWED_ORIGINS` con el frontend de las pruebas (puerto 5174); si no, el filtro le respondería 403.
+- **`backend/.env.example`**: comentarios de `CORS_ALLOWED_ORIGINS` y `DOCUMENTACION_API`.
+- **Pruebas:** 18 nuevas del backend en `config/tests.py` (`ConfiguracionCorsTests`, `OrigenesApiTests`, `DocumentacionApiTests`); total 395. 1 nueva de la raíz (`scripts/e2e.test.mjs`); total 24.
+- **Documentación:** `docs/cors-y-swagger.md` (nuevo: qué es CORS, cómo está protegida la API, cómo usar Swagger y cómo mostrarlo en una revisión), D-19 en `docs/decisiones.md`, `README.md`, `CLAUDE.md`, `docs/auditoria-owasp.md` y `docs/progreso.md`.
+
+**Por qué:** lo pidió la clase de Programación Web 2: documentar la API con Swagger y que CORS bloquee los orígenes no autorizados. Con `DEBUG=True` se aceptaba cualquier origen, así que en el computador del usuario no se veía ningún bloqueo; y CORS solo esconde la respuesta en el navegador, mientras que el 403 evita que la petición se procese.
+
 ### Plantillas según el manual de procesamiento macroscópico y muestreo para histología (D-18)
 
 **Qué se cambió:**

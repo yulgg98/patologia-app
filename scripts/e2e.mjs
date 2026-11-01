@@ -29,13 +29,15 @@ const NAVEGADOR = 'chrome';
  * Variables de entorno del backend de las pruebas: su propia base y un límite de peticiones
  * por usuario más alto (Cypress hace en segundos lo que una persona hace en minutos).
  * El límite del login no cambia. La salida va en UTF-8 (entornoPython) para que las tildes del
- * registro no salgan mal en Windows.
+ * registro no salgan mal en Windows. CORS_ALLOWED_ORIGINS es el frontend de las pruebas (5174):
+ * el backend rechaza con 403 las peticiones de cualquier otro origen (D-19).
  */
 export function entornoBackend(entorno = process.env) {
   return {
     ...entornoPython(entorno),
     SQLITE_NOMBRE: ARCHIVO_BASE,
     LIMITE_PETICIONES_USUARIO: '2000/minute',
+    CORS_ALLOWED_ORIGINS: `http://localhost:${PUERTO_FRONTEND},http://127.0.0.1:${PUERTO_FRONTEND}`,
   };
 }
 

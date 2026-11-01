@@ -136,7 +136,8 @@ Un informe finalizado se corrige **siempre** agregándole una adenda. No hay otr
   - Django 4.2 LTS
   - Django REST Framework 3.14+
   - SimpleJWT (tokens de acceso de 8 horas y de renovación de 7 días, con rotación)
-  - django-cors-headers
+  - django-cors-headers (solo los orígenes autorizados, D-19)
+  - drf-spectacular y drf-spectacular-sidecar (documentación Swagger / OpenAPI, D-19)
   - python-decouple (configuración desde `.env`)
   - ReportLab (PDF) y Pillow (validación de imágenes)
   - SQLite en desarrollo; PostgreSQL si se define `DB_NAME` en el `.env`
@@ -169,6 +170,8 @@ patologia-app/
 │   │   ├── paginacion.py      # Paginación (20 por página, ?page_size= hasta 1000)
 │   │   ├── catalogos.py       # Piezas comunes de los catálogos de EPS y servicios
 │   │   ├── filtros.py         # Lectura de los filtros de la URL (id y fecha; 400 si no son válidos)
+│   │   ├── origenes.py        # 403 a las peticiones de orígenes no permitidos (D-19)
+│   │   ├── documentacion.py   # Swagger (/api/docs/) y esquema OpenAPI (/api/schema/) (D-19)
 │   │   ├── test_runner.py     # Ejecutor de pruebas (sin límites de peticiones acumulados)
 │   │   └── tests.py           # Pruebas de la configuración (SECRET_KEY y DEBUG)
 │   ├── informes/
@@ -492,6 +495,8 @@ En una base que ya tenía las plantillas anteriores, `python manage.py actualiza
 
 ## Referencia de la API REST
 
+**Documentación interactiva (Swagger, D-19):** con el backend arrancado en desarrollo, `http://localhost:8000/api/docs/` muestra todos los endpoints y permite probarlos (el token se pega en "Authorize"), y `http://localhost:8000/api/schema/` da el esquema OpenAPI 3. Los pasos y cómo mostrar el bloqueo de CORS están en [`docs/cors-y-swagger.md`](docs/cors-y-swagger.md).
+
 Todas las rutas exigen la cabecera `Authorization: Bearer <token>`, excepto el login y la renovación del token. Los listados vienen **paginados de 20 en 20**: la respuesta trae `count`, `next`, `previous` y `results`, y se pide otra página con `?page=2`. Con `?page_size=` se puede pedir una página más grande, hasta 1000 elementos.
 
 ### Autenticación y usuarios (`/api/auth/`)
@@ -645,7 +650,8 @@ graph TD
   Los límites de login y de registro se suman al general de anónimos o de usuarios. Por IP cuenta la de la conexión, no la cabecera `X-Forwarded-For`, que el cliente puede inventar (ver `NUM_PROXIES` abajo).
 
 - **Contraseñas** validadas con los validadores de Django: longitud mínima, que no sean comunes, que no sean solo números y que no se parezcan al usuario.
-- **Configuración segura por defecto**: sin `SECRET_KEY` la app no arranca, y `DEBUG` es `False` si no se define. Con `DEBUG=False` se activan HTTPS, cookies seguras y HSTS, y CORS solo acepta los orígenes de `CORS_ALLOWED_ORIGINS`.
+- **Configuración segura por defecto**: sin `SECRET_KEY` la app no arranca, y `DEBUG` es `False` si no se define. Con `DEBUG=False` se activan HTTPS, cookies seguras y HSTS, y la documentación Swagger se apaga.
+- **CORS (D-19)**: solo los orígenes de `CORS_ALLOWED_ORIGINS` pueden llamar a la API desde un navegador, también en desarrollo. A una petición de cualquier otro origen la API le responde 403 sin procesarla, y el navegador la bloquea por CORS. Ver [`docs/cors-y-swagger.md`](docs/cors-y-swagger.md).
 - **PDF**: el texto escrito por el usuario se escapa, así que no puede romper ni alterar el documento. El nombre del archivo solo lleva el número de petición, nunca datos del paciente. El PDF de un borrador solo lo descargan su autor o un administrador, con marca de agua "BORRADOR".
 - **Integridad del informe**: un informe finalizado no se modifica (se corrige con adendas firmadas) y conserva los datos del paciente, la EPS, el servicio, la firma y el encabezado del laboratorio tal como estaban al finalizar (D-10, D-15).
 - **Imágenes del foro**: se comprueban el tamaño, la extensión y el formato real (solo JPG, PNG, GIF y WEBP). Cada imagen se vuelve a codificar antes de guardarla, lo que quita los metadatos EXIF (fecha, equipo, ubicación) y cualquier contenido agregado, y se guarda con un nombre aleatorio. Igual en `/admin/`. Las direcciones de `/media/` no piden sesión: no subas imágenes con datos de pacientes.
@@ -653,7 +659,8 @@ graph TD
 - **Datos de pacientes**: son datos de salud, que la Ley 1581 de 2012 considera sensibles. Solo los ven usuarios con sesión y se guardan solo los que aparecen en el informe. La [política de privacidad](frontend/src/pages/PoliticaPrivacidadPage.jsx) de la aplicación (`/politica-privacidad`) lo explica. Antes de un uso real haría falta una revisión legal.
 
 Para publicar la app en un servidor:
-- Define una `SECRET_KEY` propia, `DEBUG=False`, `ALLOWED_HOSTS` y `CORS_ALLOWED_ORIGINS`.
+- Define una `SECRET_KEY` propia, `DEBUG=False`, `ALLOWED_HOSTS` y `CORS_ALLOWED_ORIGINS` (la dirección real del frontend).
+- La documentación Swagger queda apagada (404). Si se quiere publicar, `DOCUMENTACION_API=True` y `python manage.py collectstatic`, y servir los archivos estáticos.
 - Define `NUM_PROXIES` en `backend/.env`: `0` (por defecto) si Django recibe las peticiones directamente, `1` detrás de un Nginx que agrega la IP real en `X-Forwarded-For`. Con `0` detrás de un proxy, todos los usuarios compartirían la IP del proxy y los límites de login los bloquearían a todos a la vez.
 - Guarda la salida de la consola de Django (los registros), por ejemplo con systemd o Docker, y revisa los avisos de "Inicio de sesión fallido".
 - Configura en el servidor web un límite de tamaño de petición (por ejemplo, `client_max_body_size 60m;` en Nginx).
@@ -670,6 +677,7 @@ La [auditoría de seguridad OWASP Top 10:2025](docs/auditoria-owasp.md) (2026-10
 |---|---|
 | [`CHANGELOG.md`](CHANGELOG.md) | Registro de cada cambio: fecha, qué se cambió y por qué |
 | [`docs/auditoria-inicial.md`](docs/auditoria-inicial.md) | Auditoría del código, con el estado de cada hallazgo |
+| [`docs/cors-y-swagger.md`](docs/cors-y-swagger.md) | CORS, el bloqueo de orígenes no permitidos y la documentación Swagger de la API, con los pasos para mostrarlos |
 | [`docs/auditoria-owasp.md`](docs/auditoria-owasp.md) | Auditoría de seguridad según OWASP Top 10:2025, con los hallazgos `O-x` |
 | [`docs/decisiones.md`](docs/decisiones.md) | Decisiones de diseño y de reglas de negocio |
 | [`docs/plantillas-manual.md`](docs/plantillas-manual.md) | Correspondencia de las 14 plantillas con el manual de procesamiento macroscópico, canastillas y lo pendiente de validar |

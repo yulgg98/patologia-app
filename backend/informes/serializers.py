@@ -34,7 +34,7 @@ class CategoriaSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'fecha_creacion']
 
-    def get_total_patologias(self, obj):
+    def get_total_patologias(self, obj) -> int:
         # En el listado viene contado en la misma consulta (annotate, auditoría M-4);
         # al crear o editar una sola categoría se cuenta aparte.
         anotado = getattr(obj, 'num_patologias', None)
@@ -271,19 +271,19 @@ class InformeSerializer(serializers.ModelSerializer):
             'fecha_actualizacion',
         ]
 
-    def get_paciente_datos(self, informe):
+    def get_paciente_datos(self, informe) -> dict | None:
         paciente = informe.datos_impresos()['paciente']
         if paciente is None:  # informe de antes de la etapa 4
             return None
         return {**paciente, 'edad': informe.edad_paciente(paciente)}
 
-    def get_eps_nombre(self, informe):
+    def get_eps_nombre(self, informe) -> str | None:
         return informe.datos_impresos()['eps_nombre']
 
-    def get_servicio_nombre(self, informe):
+    def get_servicio_nombre(self, informe) -> str | None:
         return informe.datos_impresos()['servicio_nombre']
 
-    def get_firma(self, informe):
+    def get_firma(self, informe) -> dict | None:
         return informe.datos_impresos()['firma']
 
     def validate_fecha_ingreso(self, valor):

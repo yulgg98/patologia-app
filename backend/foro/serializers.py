@@ -11,7 +11,7 @@ class TemaForoSerializer(serializers.ModelSerializer):
         fields = ['id', 'nombre', 'descripcion', 'activo', 'total_publicaciones', 'fecha_creacion']
         read_only_fields = ['id', 'fecha_creacion']
 
-    def get_total_publicaciones(self, obj):
+    def get_total_publicaciones(self, obj) -> int:
         # En el listado viene contado en la misma consulta (annotate, auditoría M-4).
         anotado = getattr(obj, 'num_publicaciones', None)
         return anotado if anotado is not None else obj.publicaciones.count()
@@ -119,7 +119,7 @@ class PublicacionListSerializer(serializers.ModelSerializer):
             'fecha_creacion',
         ]
 
-    def get_portada(self, obj):
+    def get_portada(self, obj) -> str | None:
         # Usa las imágenes ya precargadas; .first() haría una consulta nueva por publicación.
         imagenes = list(obj.imagenes.all())
         if not imagenes:

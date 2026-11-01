@@ -36,6 +36,8 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',  # lista negra de tokens (decisión D-6)
     'corsheaders',
+    'drf_spectacular',  # documentación Swagger / OpenAPI (decisión D-19)
+    'drf_spectacular_sidecar',  # archivos de Swagger UI servidos por Django, sin CDN (D-19)
     # Local
     'accounts',
     'informes',
@@ -45,6 +47,8 @@ INSTALLED_APPS = [
 
 # ---------- Middleware ----------
 MIDDLEWARE = [
+    # Va antes que CORS: corta con 403 las peticiones a /api/ de orígenes no permitidos (D-19).
+    'config.origenes.OrigenPermitidoMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -126,6 +130,8 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': ('rest_framework.permissions.IsAuthenticated',),
     'DEFAULT_PAGINATION_CLASS': 'config.paginacion.PaginacionEstandar',  # admite ?page_size= (máx. 1000)
     'PAGE_SIZE': 20,
+    # Esquema OpenAPI para la documentación Swagger (decisión D-19).
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
     # ---- Anti-SPAM / seguridad de la API REST ----
     # Limita cuántas peticiones puede hacer un cliente en una ventana de tiempo,
     # para frenar fuerza bruta en login y flood de publicaciones/comentarios.
@@ -161,12 +167,36 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
-# ---------- CORS ----------
-# En desarrollo (DEBUG=True) se permite todo para no trabar al equipo.
-# En producción SOLO se permiten los orígenes listados explícitamente en el .env.
-CORS_ALLOW_ALL_ORIGINS = DEBUG
-if not DEBUG:
-    CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='', cast=Csv())
+# ---------- CORS (decisión D-19) ----------
+# Solo los orígenes listados en CORS_ALLOWED_ORIGINS pueden llamar a la API desde un
+# navegador, también en desarrollo: ya no se permite cualquier origen con DEBUG=True.
+# Por defecto, el frontend de desarrollo (Vite, puerto 5173). Además de CORS,
+# config/origenes.py responde 403 a las peticiones de cualquier otro origen.
+CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://localhost:5173,http://127.0.0.1:5173', cast=Csv())
+
+# ---------- Documentación de la API: Swagger (decisión D-19) ----------
+# /api/schema/ (OpenAPI) y /api/docs/ (Swagger), en config/documentacion.py. Por defecto
+# solo con DEBUG=True, para no publicar el mapa de la API en producción (si no, 404).
+DOCUMENTACION_API = config('DOCUMENTACION_API', default=DEBUG, cast=bool)
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'API de PathoLab',
+    'DESCRIPTION': (
+        'API REST de PathoLab: informes histopatológicos, pacientes, plantillas y foro. '
+        'Para probar los endpoints, obtén un token en POST /api/auth/login/ y pégalo en "Authorize". '
+        'Solo se aceptan peticiones de navegador desde los orígenes de CORS_ALLOWED_ORIGINS.'
+    ),
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    # La documentación se ve sin iniciar sesión; los endpoints siguen pidiendo el token.
+    'SERVE_PERMISSIONS': ['rest_framework.permissions.AllowAny'],
+    'SERVE_AUTHENTICATION': [],
+    'SWAGGER_UI_SETTINGS': {'persistAuthorization': True},
+    # Swagger UI desde drf-spectacular-sidecar: funciona sin internet y con una versión fija.
+    'SWAGGER_UI_DIST': 'SIDECAR',
+    'SWAGGER_UI_FAVICON_HREF': 'SIDECAR',
+    'REDOC_DIST': 'SIDECAR',
+}
 
 # ---------- Seguridad general adicional ----------
 SECURE_CONTENT_TYPE_NOSNIFF = True

@@ -24,12 +24,22 @@ test('el backend de las pruebas usa su propia base y no la de desarrollo', () =>
   assert.equal(entorno.SECRET_KEY, 'x');
 });
 
-test('solo sube el límite de peticiones por usuario y escribe la salida en UTF-8', () => {
+test('solo sube el límite de peticiones por usuario, permite su frontend y escribe la salida en UTF-8', () => {
   const entorno = entornoBackend({});
   assert.equal(entorno.LIMITE_PETICIONES_USUARIO, '2000/minute');
   // Sin UTF-8, las tildes del registro salen mal en Windows ("Inicio de sesi�n").
   assert.equal(entorno.PYTHONIOENCODING, 'utf-8');
-  assert.deepEqual(Object.keys(entorno).sort(), ['LIMITE_PETICIONES_USUARIO', 'PYTHONIOENCODING', 'SQLITE_NOMBRE']);
+  assert.deepEqual(Object.keys(entorno).sort(), [
+    'CORS_ALLOWED_ORIGINS',
+    'LIMITE_PETICIONES_USUARIO',
+    'PYTHONIOENCODING',
+    'SQLITE_NOMBRE',
+  ]);
+});
+
+test('el backend de las pruebas acepta el origen de su frontend (D-19)', () => {
+  const origenes = entornoBackend({}).CORS_ALLOWED_ORIGINS.split(',');
+  assert.deepEqual(origenes, [`http://localhost:${PUERTO_FRONTEND}`, `http://127.0.0.1:${PUERTO_FRONTEND}`]);
 });
 
 test('prepara la base con migrate y seed_data, con el Python del venv', () => {

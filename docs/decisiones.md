@@ -184,3 +184,13 @@ Los códigos como "I-7" o "C-2" remiten a `docs/auditoria-inicial.md`.
   - **Muestreo para histología:** cada informe tiene una lista de canastillas (identificación única, región, lesión o margen, tejido, cantidad, entintado, motivo, observaciones), aparte de la descripción macroscópica. Las agrega siempre el usuario, las que el caso necesite: no hay un número fijo y el sistema no crea canastillas. La guía del manual de cada patología se muestra solo como referencia. El muestreo no es un hallazgo ni un diagnóstico: la descripción no lo menciona y el PDF lo imprime en su propia sección.
   - **Integridad:** las canastillas de un informe finalizado no se modifican, ni por la API ni en `/admin/` (D-3, D-14).
 - **Motivo:** las plantillas exigían datos que no corresponden a todos los procedimientos (por ejemplo, márgenes en una biopsia por aguja), les faltaban datos que el manual pide y no había dónde registrar las canastillas. Un formulario que obliga a inventar datos, o que redacta un vacío como un hallazgo, compromete la fidelidad del informe.
+
+## D-19. CORS estricto y documentación Swagger de la API
+
+- **Fecha:** 2026-11-01
+- **Relacionado con:** D-6; `docs/cors-y-swagger.md`; hallazgos de configuración de `docs/auditoria-owasp.md`
+- **Decisión:**
+  - **CORS siempre estricto:** solo los orígenes de `CORS_ALLOWED_ORIGINS` (por defecto, el frontend de desarrollo en el puerto 5173) pueden llamar a la API desde un navegador, también con `DEBUG=True`. Se elimina `CORS_ALLOW_ALL_ORIGINS = DEBUG`. No se usa `*`.
+  - **Bloqueo con 403:** una petición a `/api/` con una cabecera `Origin` que no es la del propio servidor ni una de `CORS_ALLOWED_ORIGINS` recibe 403 sin llegar a la vista (`config/origenes.py`, antes del middleware de CORS). Las peticiones sin `Origin` (Postman, `curl`) siguen pasando, porque `Origin` lo envía el navegador; el acceso a los datos lo sigue protegiendo el token JWT.
+  - **Documentación Swagger:** con `drf-spectacular`, en `/api/docs/` (Swagger UI, servido por Django con `drf-spectacular-sidecar`) y `/api/schema/` (OpenAPI 3). Se ve sin iniciar sesión, pero los endpoints siguen pidiendo el token ("Authorize"). Solo responde si `DOCUMENTACION_API` está activa, que por defecto sigue a `DEBUG`: en producción da 404, para no publicar el mapa de la API.
+- **Motivo:** lo pidió la clase de Programación Web 2: documentar la API con Swagger y que CORS bloquee los orígenes no autorizados. Con CORS abierto en desarrollo, la revisión en el computador del usuario no mostraba ningún bloqueo, y CORS por sí solo no impide que la petición se procese: solo esconde la respuesta.

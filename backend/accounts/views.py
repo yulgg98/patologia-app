@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
-from rest_framework import generics, permissions, status
+from drf_spectacular.utils import extend_schema, inline_serializer
+from rest_framework import generics, permissions, serializers, status
 from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle, ScopedRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
@@ -66,6 +67,14 @@ class PerfilView(generics.RetrieveUpdateAPIView):
 
 # ── Cambio de contraseña ──────────────────────────────────────────────
 class CambiarPasswordView(APIView):
+    @extend_schema(
+        summary='Cambiar la contraseña',
+        request=CambiarPasswordSerializer,
+        responses=inline_serializer(
+            'CambioPasswordRespuesta',
+            {'detail': serializers.CharField(), 'access': serializers.CharField(), 'refresh': serializers.CharField()},
+        ),
+    )
     def post(self, request):
         serializer = CambiarPasswordSerializer(data=request.data, context={'request': request})
         serializer.is_valid(raise_exception=True)
@@ -98,6 +107,11 @@ class LogoutView(APIView):
     # respondiera 401 antes de llegar aquí, y la sesión no se cerraría.
     authentication_classes = []
 
+    @extend_schema(
+        summary='Cerrar sesión',
+        request=inline_serializer('LogoutPeticion', {'refresh': serializers.CharField()}),
+        responses=inline_serializer('LogoutRespuesta', {'detail': serializers.CharField()}),
+    )
     def post(self, request):
         try:
             RefreshToken(request.data.get('refresh', '')).blacklist()

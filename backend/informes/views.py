@@ -4,7 +4,9 @@ from django.db import IntegrityError, transaction
 from django.db.models import Count, Max, ProtectedError, Q
 from django.http import HttpResponse
 from django.utils import timezone
+from drf_spectacular.utils import extend_schema
 from rest_framework import filters, status, viewsets
+from rest_framework import serializers as drf_serializers
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
@@ -132,6 +134,21 @@ class ServicioViewSet(viewsets.ModelViewSet):
             )
 
 
+class OpcionSerializer(drf_serializers.Serializer):
+    """Una opción de una lista fija (solo para la documentación Swagger, D-19)."""
+
+    valor = drf_serializers.CharField()
+    etiqueta = drf_serializers.CharField()
+
+
+class OpcionesSerializer(drf_serializers.Serializer):
+    """Respuesta de GET /api/opciones/ (solo para la documentación Swagger, D-19)."""
+
+    sexos = OpcionSerializer(many=True)
+    tipos_documento = OpcionSerializer(many=True)
+    tipos_estudio = OpcionSerializer(many=True)
+
+
 def _opciones(choices):
     return [{'valor': valor, 'etiqueta': etiqueta} for valor, etiqueta in choices.choices]
 
@@ -143,6 +160,7 @@ class OpcionesView(APIView):
     servicios son catálogos editables y tienen sus propios endpoints.
     """
 
+    @extend_schema(summary='Listas fijas de opciones', responses=OpcionesSerializer)
     def get(self, request):
         return Response(
             {

@@ -181,7 +181,7 @@ Los roles (admin, patólogo, auditor), la regla del autor (D-2), los informes fi
 - `X_FRAME_OPTIONS = 'DENY'` y `SECURE_CONTENT_TYPE_NOSNIFF`.
 - `/media/` solo lo sirve Django en desarrollo.
 - **`check --deploy`** con `DEBUG=False` y una clave propia da un solo aviso, W008 (`SECURE_SSL_REDIRECT`). Sale porque el `.env` local, copiado de `.env.example`, la pone en `False` (O-7). No hay ningún otro aviso.
-- El `CORS_ALLOW_ALL_ORIGINS` de desarrollo es poco peligroso: la API se autentica por cabecera, no por cookies, así que otra página no puede usar la sesión del usuario.
+- El `CORS_ALLOW_ALL_ORIGINS` de desarrollo es poco peligroso: la API se autentica por cabecera, no por cookies, así que otra página no puede usar la sesión del usuario. *(Actualización 2026-11-01, D-19: ya no existe; CORS solo acepta `CORS_ALLOWED_ORIGINS` también en desarrollo, y `config/origenes.py` responde 403 a los demás orígenes.)*
 
 ### O-6. Sin política de seguridad de contenido (CSP) ni cabeceras para el frontend; un ajuste obsoleto (Media, deducido)
 
