@@ -850,3 +850,152 @@ describe('InformePage: finalizar, vista previa y cerrar sesión con cambios sin 
     );
   });
 });
+
+// Decisión D-18: campos por sección, campos que solo aplican a ciertos procedimientos y
+// muestreo para histología (canastillas).
+describe('InformePage: plantillas según el manual y canastillas (D-18)', () => {
+  const PLANTILLAS = [
+    {
+      campo_nombre: 'tipo_muestra',
+      campo_label: 'Tipo de procedimiento',
+      tipo_campo: 'lista',
+      obligatorio: true,
+      opciones: ['Tiroidectomía total', 'Lobectomía'],
+      seccion: 'Identificación y procedimiento',
+      condicion: {},
+      ayuda: '',
+    },
+    {
+      campo_nombre: 'lateralidad',
+      campo_label: 'Lateralidad',
+      tipo_campo: 'lista',
+      obligatorio: true,
+      opciones: ['Lóbulo derecho', 'Lóbulo izquierdo'],
+      seccion: 'Identificación y procedimiento',
+      condicion: { campo: 'tipo_muestra', valores: ['Lobectomía'] },
+      ayuda: 'Solo en lobectomía.',
+    },
+    {
+      campo_nombre: 'ganglios',
+      campo_label: 'Ganglios',
+      tipo_campo: 'numero',
+      obligatorio: true,
+      opciones: [],
+      seccion: 'Márgenes, orientación y estructuras',
+      condicion: {},
+      ayuda: '',
+    },
+  ];
+  const GUIA = [{ titulo: 'Orden de envío', items: ['Tercio superior, lóbulo derecho.'] }];
+
+  function simularConPlantillas(informe = INFORME) {
+    simularApi();
+    const original = client.get.getMockImplementation();
+    client.get.mockImplementation((url, ...resto) => {
+      if (url === '/patologias/1/') return Promise.resolve({ data: { plantillas: PLANTILLAS, guia_muestreo: GUIA } });
+      if (url === '/informes/5/') return Promise.resolve({ data: informe });
+      return original(url, ...resto);
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    reiniciarOpciones();
+  });
+
+  function renderNuevo() {
+    return render(<RouterProvider router={crearRouter('/informes/nuevo')} />);
+  }
+
+  async function nuevoConPatologia() {
+    renderNuevo();
+    await screen.findByRole('option', { name: 'Piel' });
+    await seleccionarPaciente();
+    fireEvent.change(screen.getByLabelText(/Tipo de Patología/i), { target: { value: '1' } });
+    await screen.findByLabelText(/Tipo de procedimiento/);
+  }
+
+  it('agrupa los campos por sección y muestra un campo solo cuando aplica', async () => {
+    simularConPlantillas();
+    await nuevoConPatologia();
+    expect(screen.getByRole('heading', { name: 'Identificación y procedimiento' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Márgenes, orientación y estructuras' })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Lateralidad/)).toBeNull();
+    fireEvent.change(screen.getByLabelText(/Tipo de procedimiento/), { target: { value: 'Lobectomía' } });
+    expect(screen.getByLabelText(/Lateralidad/)).toBeInTheDocument();
+    expect(screen.getByText('Solo en lobectomía.')).toBeInTheDocument();
+  });
+
+  it('no exige un campo que no aplica y acepta 0 como respuesta', async () => {
+    simularConPlantillas();
+    client.post.mockResolvedValue({ data: { id: 9 } });
+    await nuevoConPatologia();
+    fireEvent.change(screen.getByLabelText(/Tipo de procedimiento/), { target: { value: 'Tiroidectomía total' } });
+    fireEvent.change(screen.getByLabelText(/Ganglios/), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: /Guardar Informe/i }));
+    await vi.waitFor(() => expect(client.post).toHaveBeenCalled());
+    expect(client.post.mock.calls[0][1].datos_ingresados).toMatchObject({ ganglios: '0' });
+  });
+
+  it('exige el campo condicional cuando aplica', async () => {
+    simularConPlantillas();
+    await nuevoConPatologia();
+    fireEvent.change(screen.getByLabelText(/Tipo de procedimiento/), { target: { value: 'Lobectomía' } });
+    fireEvent.change(screen.getByLabelText(/Ganglios/), { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: /Guardar Informe/i }));
+    expect(await screen.findByText('Lateralidad es obligatorio.')).toBeInTheDocument();
+    expect(client.post).not.toHaveBeenCalled();
+  });
+
+  it('envía las canastillas que agregó el usuario y ninguna si no agregó', async () => {
+    simularConPlantillas();
+    client.post.mockResolvedValue({ data: { id: 9 } });
+    await nuevoConPatologia();
+    fireEvent.change(screen.getByLabelText(/Tipo de procedimiento/), { target: { value: 'Tiroidectomía total' } });
+    fireEvent.change(screen.getByLabelText(/Ganglios/), { target: { value: '1' } });
+    expect(screen.getByRole('heading', { name: 'Muestreo para histología' })).toBeInTheDocument();
+    expect(screen.getByText('Tercio superior, lóbulo derecho.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Agregar canastilla/ }));
+    fireEvent.change(screen.getByLabelText('Región o estructura de la canastilla 1'), {
+      target: { value: 'Tercio superior, lóbulo derecho' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Guardar Informe/i }));
+    await vi.waitFor(() => expect(client.post).toHaveBeenCalled());
+    const [canastilla] = client.post.mock.calls[0][1].canastillas;
+    expect(canastilla).toMatchObject({ codigo: 'A', region: 'Tercio superior, lóbulo derecho', cantidad: null });
+    expect(canastilla).not.toHaveProperty('clave');
+  });
+
+  it('no guarda una canastilla sin contenido', async () => {
+    simularConPlantillas();
+    await nuevoConPatologia();
+    fireEvent.change(screen.getByLabelText(/Tipo de procedimiento/), { target: { value: 'Tiroidectomía total' } });
+    fireEvent.change(screen.getByLabelText(/Ganglios/), { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: /Agregar canastilla/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Guardar Informe/i }));
+    expect(await screen.findByText(/Indique la región, la lesión o margen/)).toBeInTheDocument();
+    expect(client.post).not.toHaveBeenCalled();
+  });
+
+  it('muestra las canastillas guardadas y, en un finalizado, no deja cambiarlas', async () => {
+    const canastillas = [
+      {
+        orden: 1,
+        codigo: 'A',
+        region: 'Istmo',
+        lesion_margen: '',
+        descripcion: '',
+        cantidad: 2,
+        entintado: '',
+        motivo: '',
+        observaciones: '',
+      },
+    ];
+    simularConPlantillas({ ...INFORME, estado: 'finalizado', canastillas, datos_ingresados: { ganglios: 0 } });
+    renderInforme();
+    expect(await screen.findByLabelText('Región o estructura de la canastilla 1')).toHaveValue('Istmo');
+    expect(screen.getByLabelText('Cantidad de la canastilla 1')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /Agregar canastilla/ })).toBeNull();
+    expect(screen.getByLabelText(/Ganglios/)).toHaveValue(0); // un 0 guardado se ve
+  });
+});

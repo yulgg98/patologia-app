@@ -5,7 +5,7 @@ Este archivo dice **en qué quedamos**. Se actualiza al terminar cada tarea para
 - **Decisiones tomadas:** `docs/decisiones.md`.
 - **Lista completa de problemas:** `docs/auditoria-inicial.md`.
 
-**Última actualización:** 2026-10-14
+**Última actualización:** 2026-11-01
 
 ---
 
@@ -13,7 +13,8 @@ Este archivo dice **en qué quedamos**. Se actualiza al terminar cada tarea para
 
 - **Proyecto:** `C:\Users\salam\Desktop\patolab-app-actualizado\patologia-app`.
 - **Plan vigente:** `docs/plan-calidad-y-diseno.md`, aprobado el 2026-10-08. Cada fase va en su propia rama desde `main`.
-- **Rama de trabajo:** ninguna abierta. Todo está en `main`, que es la única rama (las ramas viejas, ya unidas, se borraron el 2026-10-14). La fase de Cypress se unió a `main` el 2026-10-14, después de que el usuario probara `npm run e2e:presentacion` en Chrome y grabara los videos de respaldo. Lo siguiente es la presentación del viernes 2026-10-16; después, los grupos 4, 6 y 7 de la fase 4.
+- **Trabajo en curso (2026-11-01):** plantillas según el manual de procesamiento macroscópico y muestreo para histología (D-18, `docs/plantillas-manual.md`), escritos en la rama en la que estaba la carpeta del proyecto (sin rama propia, por elección del usuario el 2026-11-01). Los cambios están escritos en la carpeta del proyecto, pero **falta el commit**: antes hay que ejecutar en el computador del usuario `npm run check` y todas las pruebas (regla 7). En la sesión de trabajo se ejecutaron las 377 del backend (todas en verde), Ruff, Prettier y una prueba de `InformePage` en Chromium; **las 157 del frontend (20 nuevas) no se pudieron ejecutar allí** porque no había acceso al registro de npm.
+- **Rama de trabajo anterior:** ninguna abierta. Todo está en `main`, que es la única rama (las ramas viejas, ya unidas, se borraron el 2026-10-14). La fase de Cypress se unió a `main` el 2026-10-14, después de que el usuario probara `npm run e2e:presentacion` en Chrome y grabara los videos de respaldo. Lo siguiente es la presentación del viernes 2026-10-16; después, los grupos 4, 6 y 7 de la fase 4.
 - **Estado:**
   - Están terminados y en `main`:
     - la auditoría inicial (salvo I-9c);
@@ -29,7 +30,7 @@ Este archivo dice **en qué quedamos**. Se actualiza al terminar cada tarea para
   5. Antes del commit, si el cambio toca código, ejecutar `npm run check` y todas las pruebas (raíz, backend y frontend). Si algo falla, no se hace el commit hasta corregirlo. Si el commit solo cambia documentación, no hace falta ejecutar las pruebas (regla 7 de `CLAUDE.md`).
   6. Hacer el commit.
   7. Hacer `git push` de la rama de trabajo después de cada commit, como respaldo. El usuario lo autorizó el 2026-10-03. Unir la rama a `main` requiere preguntar aparte.
-- **Pruebas:** 23 de la raíz (`npm test`, comprobaciones de `npm run dev`, `npm run check` y `npm run e2e`), 322 del backend (`cd backend` y luego `python manage.py test`; con SQLite usan el archivo `backend/test_db.sqlite3`) y 137 del frontend (`cd frontend` y luego `npm test`). Además, 25 de Cypress (`npm run e2e` en la raíz, cerca de un minuto; no son obligatorias antes de cada commit, D-17). Todas pasan.
+- **Pruebas:** 23 de la raíz (`npm test`, comprobaciones de `npm run dev`, `npm run check` y `npm run e2e`), 377 del backend desde D-18 (antes 322) (`cd backend` y luego `python manage.py test`; con SQLite usan el archivo `backend/test_db.sqlite3`) y 157 del frontend desde D-18 (antes 137; `cd frontend` y luego `npm test`). Además, 25 de Cypress (`npm run e2e` en la raíz, cerca de un minuto; no son obligatorias antes de cada commit, D-17). Todas pasan, salvo las 20 nuevas del frontend de D-18, que aún no se han ejecutado.
 
 ## Hecho
 
@@ -109,8 +110,11 @@ Este archivo dice **en qué quedamos**. Se actualiza al terminar cada tarea para
 | — | Unión de `fase-cypress` a `main` (fast-forward), con la aprobación del usuario tras probar el modo presentación en Chrome | `162e05b` |
 | — | Limpieza de ramas: se borran `fase-cypress` y otras 17 ramas viejas, en el computador y en GitHub. Antes se comprobó que ninguna tenía commits fuera de `main`, así que no se pierde nada: los commits citados en esta tabla siguen en `main`. Solo queda `main`. Lo pidió el usuario el 2026-10-14 | commit "docs: ramas viejas borradas" |
 | O-22, O-23, O-21 | Fase 4, grupo 5: filtros de la URL con 400 en vez de 500 (`config/filtros.py`); `datos_ingresados` validado en el modelo (objeto, valores simples, límites) y `{}` se guarda en `/admin/` (migración 0013); `texto_generado` en la misma transacción; `LOGGING` y registro de logins (logger `seguridad`, `LOG_LEVEL`). 19 pruebas nuevas | commit "fix(seguridad): errores y registros (fase 4, grupo 5)" |
+| D-18 | Plantillas según el manual de procesamiento macroscópico (secciones, campos que aplican según el procedimiento, 124 → 260 campos sin borrar ninguno, `actualizar_plantillas`), muestreo para histología con canastillas (modelo `Canastilla`, migración 0014, API, `/admin/`, PDF y `MuestreoHistologia`) y descripción fiel a lo registrado. 55 pruebas nuevas del backend y 20 del frontend | pendiente (falta la regla 7 en el computador del usuario) |
 
 ## Siguiente paso
+
+0. **D-18 (2026-11-01):** ejecutar `npm run check` y todas las pruebas, hacer el commit y probar a mano un informe de Tiroides y uno de Mama (campos que aparecen según el procedimiento, canastillas y PDF). Después, pedir al patólogo que revise la sección 6 de `docs/plantillas-manual.md`. En una base existente, aplicar `python manage.py migrate` y `python manage.py actualizar_plantillas`.
 
 1. **Fase 3 terminada** y unida a `main` el 2026-10-11. El usuario respondió el informe el mismo día (`docs/auditoria-owasp.md`, "Respuestas del usuario").
 2. **Fase 4, una rama por grupo** (tabla en la fase 4 del plan). El 2026-10-11 y el 2026-10-12, en orden:
@@ -167,6 +171,7 @@ Inventario del 2026-10-08: todo lo pendiente, sin terminar o anotado para despu�
   - informes finalizados de solo lectura en `/admin/` (D-14). **Hecho** el 2026-10-11 (fase 4, grupo 1);
   - corregir ya los avisos de `npm audit`. **Hecho** el mismo día.
 - **Ya decidido el 2026-10-11** (respuestas a la auditoría OWASP): D-16 (solo `is_active` y token de acceso de 30 minutos, grupo 6 de la fase 4) y el orden de la fase 4 (ver el plan).
+- **Para consultar con el patólogo (D-18):** lo pendiente de validar de las plantillas del manual, en la sección 6 de `docs/plantillas-manual.md`: apartados incompletos del manual («COMPLEMENTAR», «(corregir)», capítulo de biopsias pequeñas), procedimientos sin protocolo (biopsia de próstata por aguja, gástrica endoscópica, bronquiales, lipomas y quistes), las categorías de «Márgenes quirúrgicos», los obligatorios condicionales nuevos y la frase final de la descripción.
 - **Para consultar con el patólogo y el profesor:** hoy el auditor y los demás patólogos leen por la API el contenido de los borradores ajenos (D-2), aunque no pueden descargar su PDF (D-12). El usuario decidió el 2026-10-11 mantenerlo así hasta consultarlo (observación de A01 en `docs/auditoria-owasp.md`).
 
 ### 3. Para producción (al publicar la aplicación)

@@ -1,6 +1,16 @@
 from django.contrib import admin
 
-from .models import Adenda, Categoria, ConsecutivoPeticion, Diagnostico, Informe, Patologia, Plantilla, Servicio
+from .models import (
+    Adenda,
+    Canastilla,
+    Categoria,
+    ConsecutivoPeticion,
+    Diagnostico,
+    Informe,
+    Patologia,
+    Plantilla,
+    Servicio,
+)
 
 
 class PlantillaInline(admin.TabularInline):
@@ -16,6 +26,22 @@ class DiagnosticoInline(admin.TabularInline):
     """Los diagnósticos de un informe finalizado son de solo lectura (decisión D-14)."""
 
     model = Diagnostico
+    extra = 0
+
+    def has_add_permission(self, request, obj=None):
+        return not es_finalizado(obj) and super().has_add_permission(request, obj)
+
+    def has_change_permission(self, request, obj=None):
+        return not es_finalizado(obj) and super().has_change_permission(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        return not es_finalizado(obj) and super().has_delete_permission(request, obj)
+
+
+class CanastillaInline(admin.TabularInline):
+    """Las canastillas de un informe finalizado son de solo lectura, como sus diagnósticos (D-14, D-18)."""
+
+    model = Canastilla
     extra = 0
 
     def has_add_permission(self, request, obj=None):
@@ -96,7 +122,7 @@ class InformeAdmin(admin.ModelAdmin):
         'fecha_creacion',
         'fecha_actualizacion',
     ]
-    inlines = [DiagnosticoInline, AdendaInline]
+    inlines = [DiagnosticoInline, CanastillaInline, AdendaInline]
 
     # Un informe finalizado no se modifica ni se borra, tampoco aquí (decisión D-14): la
     # ficha queda de solo lectura y se corrige con adendas (D-9). Django revisa el borrado
@@ -126,5 +152,5 @@ class ConsecutivoPeticionAdmin(admin.ModelAdmin):
 
 @admin.register(Plantilla)
 class PlantillaAdmin(admin.ModelAdmin):
-    list_display = ['campo_nombre', 'patologia', 'tipo_campo', 'obligatorio', 'orden']
+    list_display = ['campo_nombre', 'patologia', 'seccion', 'tipo_campo', 'obligatorio', 'orden']
     list_filter = ['patologia', 'tipo_campo', 'obligatorio']

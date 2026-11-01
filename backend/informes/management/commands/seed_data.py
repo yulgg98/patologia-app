@@ -7,6 +7,7 @@ Uso: python manage.py seed_data (se puede ejecutar varias veces sin duplicar dat
 from datetime import date
 
 from django.contrib.auth import get_user_model
+from django.core.management import call_command
 from django.core.management.base import BaseCommand
 
 from foro.models import TemaForo
@@ -1253,6 +1254,10 @@ class Command(BaseCommand):
                     Plantilla.objects.create(patologia=pat, **c)
             else:
                 self.stdout.write(f'  Patologia "{pat.nombre}" ya existe, omitida.')
+
+        # Secciones, condiciones, campos nuevos y guía de muestreo según el manual de
+        # procesamiento macroscópico (D-18). También actualiza las bases ya sembradas.
+        call_command('actualizar_plantillas', stdout=self.stdout)
 
         # ── Temas iniciales del foro (decisión D-5) ─────
         temas_foro = [

@@ -1,11 +1,14 @@
 import threading
 from datetime import date, datetime, timedelta
 from datetime import timezone as dt_timezone
+from io import StringIO
+from types import SimpleNamespace
 from unittest import mock
 
+from django.core.management import call_command
 from django.db import IntegrityError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TestCase, TransactionTestCase, override_settings
+from django.test import SimpleTestCase, TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APIClient, APITestCase
@@ -13,7 +16,11 @@ from rest_framework.test import APIClient, APITestCase
 from accounts.models import Usuario
 from pacientes.models import EPS, Paciente
 
-from .models import Adenda, Categoria, Diagnostico, Informe, Patologia, Plantilla, Servicio, firma_de
+from .definiciones_manual import DEFINICIONES
+from .models import Adenda, Canastilla, Categoria, Diagnostico, Informe, Patologia, Plantilla, Servicio, firma_de
+from .reglas import campos_aplicables, validar_datos
+from .serializers import MAX_CANASTILLAS
+from .utils import generar_descripcion_macroscopica
 
 
 def paciente_ficticio(numero='PRUEBA0001', **extra):
@@ -3054,3 +3061,648 @@ class AdminDatosIngresadosTests(TestCase):
         self.assertIn('datos_ingresados', respuesta.context['adminform'].form.errors)
         self.informe.refresh_from_db()
         self.assertEqual(self.informe.datos_ingresados, {})
+
+
+# ── Plantillas según el manual de procesamiento macroscópico y canastillas (D-18) ──
+
+
+def plantilla_simple(campo_nombre, **extra):
+    """Objeto con los atributos de Plantilla, para probar informes/reglas.py sin base de datos."""
+    datos = {
+        'campo_nombre': campo_nombre,
+        'campo_label': '',
+        'tipo_campo': 'texto',
+        'obligatorio': False,
+        'opciones': [],
+        'condicion': {},
+        **extra,
+    }
+    return SimpleNamespace(**datos)
+
+
+class ReglasCamposTests(SimpleTestCase):
+    """informes/reglas.py: obligatorio, condicional, opcional y no aplicable (D-18)."""
+
+    def setUp(self):
+        self.plantillas = [
+            plantilla_simple('tipo_muestra', tipo_campo='lista', obligatorio=True, opciones=['Biopsia', 'Resección']),
+            plantilla_simple(
+                'margenes',
+                campo_label='Márgenes',
+                tipo_campo='lista',
+                obligatorio=True,
+                opciones=['Libres', 'Comprometidos'],
+                condicion={'campo': 'tipo_muestra', 'valores': ['Resección']},
+            ),
+            plantilla_simple(
+                'distancia',
+                campo_label='Distancia',
+                condicion={'campo': 'margenes', 'valores': ['Comprometidos']},
+            ),
+            plantilla_simple('peso', campo_label='Peso', tipo_campo='numero'),
+        ]
+
+    def test_un_campo_sin_condicion_siempre_aplica(self):
+        self.assertIn('peso', campos_aplicables(self.plantillas, {}))
+
+    def test_un_campo_condicional_aplica_solo_con_su_valor(self):
+        self.assertNotIn('margenes', campos_aplicables(self.plantillas, {'tipo_muestra': 'Biopsia'}))
+        self.assertIn('margenes', campos_aplicables(self.plantillas, {'tipo_muestra': 'Resección'}))
+
+    def test_un_valor_viejo_de_un_campo_que_no_aplica_no_activa_a_los_que_dependen_de_el(self):
+        datos = {'tipo_muestra': 'Biopsia', 'margenes': 'Comprometidos'}
+        self.assertNotIn('distancia', campos_aplicables(self.plantillas, datos))
+
+    def test_el_obligatorio_condicional_solo_se_exige_si_aplica(self):
+        self.assertEqual(validar_datos(self.plantillas, {'tipo_muestra': 'Biopsia'}), [])
+        errores = validar_datos(self.plantillas, {'tipo_muestra': 'Resección'})
+        self.assertEqual(errores, ['Faltan campos obligatorios: Márgenes'])
+
+    def test_cero_es_una_respuesta_y_un_negativo_no(self):
+        self.assertEqual(validar_datos(self.plantillas, {'tipo_muestra': 'Biopsia', 'peso': 0}), [])
+        self.assertEqual(
+            validar_datos(self.plantillas, {'tipo_muestra': 'Biopsia', 'peso': -2}),
+            ['«Peso» no puede ser negativo.'],
+        )
+        self.assertEqual(
+            validar_datos(self.plantillas, {'tipo_muestra': 'Biopsia', 'peso': 'doce'}),
+            ['«Peso» debe ser un número.'],
+        )
+
+    def test_una_opcion_que_no_esta_en_la_lista_se_rechaza(self):
+        errores = validar_datos(self.plantillas, {'tipo_muestra': 'Inventada'})
+        self.assertEqual(errores, ['«tipo_muestra»: «Inventada» no es una de las opciones.'])
+
+    def test_un_valor_ya_guardado_se_conserva_aunque_la_opcion_se_haya_quitado(self):
+        # Como una EPS desactivada (D-4): el informe que ya lo tenía lo conserva.
+        datos = {'tipo_muestra': 'Opción retirada'}
+        self.assertEqual(validar_datos(self.plantillas, datos, guardados=datos), [])
+
+    def test_un_campo_que_no_aplica_no_se_valida(self):
+        datos = {'tipo_muestra': 'Biopsia', 'margenes': 'Inventado'}
+        self.assertEqual(validar_datos(self.plantillas, datos), [])
+
+    def test_una_condicion_circular_no_aplica(self):
+        plantillas = [
+            plantilla_simple('a', tipo_campo='lista', opciones=['x'], condicion={'campo': 'b', 'valores': ['x']}),
+            plantilla_simple('b', tipo_campo='lista', opciones=['x'], condicion={'campo': 'a', 'valores': ['x']}),
+        ]
+        self.assertEqual(campos_aplicables(plantillas, {'a': 'x', 'b': 'x'}), set())
+
+
+class PlantillasManualTests(TestCase):
+    """
+    `actualizar_plantillas` (D-18): aplica a las 14 patologías las definiciones del
+    manual sin borrar campos ni opciones y sin tocar los informes. seed_data lo llama.
+    """
+
+    NOMBRES = [
+        'Biopsia de Piel',
+        'Biopsia de Mama',
+        'Apéndice Cecal',
+        'Vesícula Biliar',
+        'Biopsia de Próstata',
+        'Tiroides',
+        'Colon y Recto',
+        'Útero y Cérvix',
+        'Ganglio Linfático',
+        'Biopsia Gástrica',
+        'Pulmón',
+        'Riñón',
+        'Amígdalas y Adenoides',
+        'Tejido Blando',
+    ]
+
+    @classmethod
+    def setUpTestData(cls):
+        call_command('seed_data', stdout=StringIO())
+
+    def campos(self, nombre):
+        return {p.campo_nombre: p for p in Plantilla.objects.filter(patologia__nombre=nombre)}
+
+    def test_siguen_las_14_patologias(self):
+        self.assertEqual(sorted(Patologia.objects.values_list('nombre', flat=True)), sorted(self.NOMBRES))
+        self.assertEqual(sorted(DEFINICIONES), sorted(self.NOMBRES))
+
+    def test_cada_plantilla_tiene_sus_campos_del_manual_con_seccion_y_su_guia(self):
+        for nombre, definicion in DEFINICIONES.items():
+            with self.subTest(nombre=nombre):
+                campos = self.campos(nombre)
+                for campo in definicion['campos']:
+                    self.assertIn(campo['campo_nombre'], campos)
+                    self.assertTrue(campos[campo['campo_nombre']].seccion)
+                self.assertTrue(Patologia.objects.get(nombre=nombre).guia_muestreo)
+
+    def test_los_campos_especificos_estan_en_su_plantilla(self):
+        self.assertIn('lesion_satelites', self.campos('Biopsia de Piel'))
+        self.assertIn('tipo_mastectomia', self.campos('Biopsia de Mama'))
+        self.assertIn('dim_lobulo_der', self.campos('Tiroides'))
+        self.assertIn('mesorrecto', self.campos('Colon y Recto'))
+        self.assertIn('orientacion_cono', self.campos('Útero y Cérvix'))
+        self.assertIn('peso_fragmentos', self.campos('Biopsia de Próstata'))
+        self.assertNotIn('mesorrecto', self.campos('Tiroides'))
+        self.assertNotIn('lesion_satelites', self.campos('Colon y Recto'))
+
+    def test_no_todos_los_campos_son_obligatorios(self):
+        for nombre in self.NOMBRES:
+            with self.subTest(nombre=nombre):
+                campos = self.campos(nombre).values()
+                self.assertLess(sum(p.obligatorio for p in campos), len(campos) / 2)
+
+    def test_se_puede_ejecutar_varias_veces_con_el_mismo_resultado(self):
+        antes = list(Plantilla.objects.order_by('id').values())
+        call_command('actualizar_plantillas', verbosity=0)
+        self.assertEqual(list(Plantilla.objects.order_by('id').values()), antes)
+
+    def test_no_borra_campos_ni_opciones(self):
+        plantilla = Plantilla.objects.get(patologia__nombre='Tiroides', campo_nombre='tipo_muestra')
+        plantilla.opciones = [*plantilla.opciones, 'Opción agregada a mano']
+        plantilla.save()
+        extra = Plantilla.objects.create(
+            patologia=plantilla.patologia, campo_nombre='campo_propio', campo_label='Campo propio', orden=5
+        )
+        call_command('actualizar_plantillas', verbosity=0)
+        plantilla.refresh_from_db()
+        extra.refresh_from_db()
+        self.assertIn('Opción agregada a mano', plantilla.opciones)
+        self.assertEqual(extra.orden, 1005)  # se conserva, al final del formulario
+
+    def test_no_cambia_los_informes(self):
+        autor = Usuario.objects.get(username='patologo1')
+        informe = Informe.objects.create(
+            patologia=Patologia.objects.get(nombre='Vesícula Biliar'),
+            autor=autor,
+            paciente=Paciente.objects.first(),
+            datos_ingresados={'consistencia': '3 mm', 'calcificaciones': 'Presente(s)'},
+            texto_generado='Texto que ya estaba.',
+        )
+        call_command('actualizar_plantillas', verbosity=0)
+        informe.refresh_from_db()
+        self.assertEqual(informe.datos_ingresados, {'consistencia': '3 mm', 'calcificaciones': 'Presente(s)'})
+        self.assertEqual(informe.texto_generado, 'Texto que ya estaba.')
+
+    def test_la_simulacion_no_guarda_nada(self):
+        Plantilla.objects.filter(campo_nombre='lesion_satelites').delete()
+        salida = StringIO()
+        call_command('actualizar_plantillas', '--simular', stdout=salida)
+        self.assertFalse(Plantilla.objects.filter(campo_nombre='lesion_satelites').exists())
+        self.assertIn('SIMULACIÓN', salida.getvalue())
+
+    def test_una_patologia_que_no_existe_se_omite_con_un_aviso(self):
+        Patologia.objects.filter(nombre='Riñón').update(nombre='Riñón (renombrada)')
+        salida = StringIO()
+        call_command('actualizar_plantillas', stdout=salida)
+        self.assertIn('[OMITIDA] La patología "Riñón" no existe.', salida.getvalue())
+
+    def test_las_condiciones_apuntan_a_campos_y_opciones_que_existen(self):
+        for patologia in Patologia.objects.prefetch_related('plantillas'):
+            campos = {p.campo_nombre: p for p in patologia.plantillas.all()}
+            for plantilla in campos.values():
+                if not plantilla.condicion:
+                    continue
+                with self.subTest(patologia=patologia.nombre, campo=plantilla.campo_nombre):
+                    referido = campos[plantilla.condicion['campo']]
+                    self.assertEqual(referido.tipo_campo, 'lista')
+                    self.assertLessEqual(set(plantilla.condicion['valores']), set(referido.opciones))
+
+
+class ValidacionPlantillasManualTests(APITestCase):
+    """La API exige solo lo que aplica al procedimiento elegido (D-18). Solo datos ficticios."""
+
+    URL = '/api/informes/'
+
+    @classmethod
+    def setUpTestData(cls):
+        call_command('seed_data', stdout=StringIO())
+
+    def setUp(self):
+        self.patologo = Usuario.objects.get(username='patologo1')
+        self.client.force_authenticate(self.patologo)
+        self.paciente = Paciente.objects.first()
+
+    def crear(self, patologia, datos):
+        cuerpo = {
+            'patologia': Patologia.objects.get(nombre=patologia).id,
+            'paciente': self.paciente.id,
+            'datos_ingresados': datos,
+        }
+        return self.client.post(self.URL, cuerpo, format='json')
+
+    def test_la_biopsia_de_mama_por_aguja_no_exige_margenes(self):
+        datos = {
+            'lateralidad': 'Derecha',
+            'tipo_muestra': 'Biopsia por aguja gruesa',
+            'dimensiones': '1.5 x 0.1',
+            'num_fragmentos': 3,
+        }
+        respuesta = self.crear('Biopsia de Mama', datos)
+        self.assertEqual(respuesta.status_code, status.HTTP_201_CREATED, respuesta.data)
+
+    def test_la_cuadrantectomia_exige_margenes(self):
+        datos = {'lateralidad': 'Derecha', 'tipo_muestra': 'Cuadrantectomía', 'dimensiones': '8 x 6 x 4'}
+        respuesta = self.crear('Biopsia de Mama', datos)
+        self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('Márgenes quirúrgicos', str(respuesta.data['datos_ingresados']))
+
+    def test_la_tiroidectomia_total_no_exige_lateralidad_y_la_lobectomia_si(self):
+        datos = {'tipo_muestra': 'Tiroidectomía total', 'dimensiones': '6 x 4 x 2', 'peso': 30, 'nodulo_presente': 'No'}
+        self.assertEqual(self.crear('Tiroides', datos).status_code, status.HTTP_201_CREATED)
+        respuesta = self.crear('Tiroides', {**datos, 'tipo_muestra': 'Lobectomía'})
+        self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('Lateralidad', str(respuesta.data['datos_ingresados']))
+
+    def test_la_rtu_de_prostata_exige_el_peso_y_no_los_cilindros(self):
+        respuesta = self.crear('Biopsia de Próstata', {'tipo_muestra': 'Resección transuretral (RTU)'})
+        self.assertIn('Peso total de los fragmentos', str(respuesta.data['datos_ingresados']))
+        self.assertNotIn('cilindros', str(respuesta.data['datos_ingresados']))
+        datos = {'tipo_muestra': 'Resección transuretral (RTU)', 'peso_fragmentos': 14}
+        self.assertEqual(self.crear('Biopsia de Próstata', datos).status_code, status.HTTP_201_CREATED)
+
+    def test_la_perforacion_presente_exige_su_detalle(self):
+        datos = {'tipo_muestra': 'Apéndice cecal', 'dimensiones': '6 x 0.8', 'superficie': 'Opaca'}
+        self.assertEqual(self.crear('Apéndice Cecal', datos).status_code, status.HTTP_201_CREATED)
+        respuesta = self.crear('Apéndice Cecal', {**datos, 'perforacion': 'Presente'})
+        self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+        respuesta = self.crear('Apéndice Cecal', {**datos, 'perforacion': 'Presente', 'perforacion_detalle': '2 mm'})
+        self.assertEqual(respuesta.status_code, status.HTTP_201_CREATED)
+
+    def test_rechaza_una_opcion_que_no_esta_en_la_lista(self):
+        datos = {'tipo_muestra': 'Apéndice cecal', 'dimensiones': '6 x 0.8', 'superficie': 'Inventada'}
+        respuesta = self.crear('Apéndice Cecal', datos)
+        self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('no es una de las opciones', str(respuesta.data['datos_ingresados']))
+
+    def test_un_borrador_conserva_una_opcion_que_despues_se_quito_de_la_plantilla(self):
+        datos = {'tipo_muestra': 'Apéndice cecal', 'dimensiones': '6 x 0.8', 'superficie': 'Opaca'}
+        informe_id = self.crear('Apéndice Cecal', datos).data['id']
+        Plantilla.objects.filter(patologia__nombre='Apéndice Cecal', campo_nombre='superficie').update(
+            opciones=['Lisa y brillante']
+        )
+        respuesta = self.client.patch(
+            f'{self.URL}{informe_id}/', {'datos_ingresados': {**datos, 'color': 'Congestivo'}}, format='json'
+        )
+        self.assertEqual(respuesta.status_code, status.HTTP_200_OK, respuesta.data)
+
+    def test_la_condicion_de_una_plantilla_se_valida(self):
+        plantilla = Plantilla.objects.filter(patologia__nombre='Tiroides').first()
+        url = f'/api/plantillas/{plantilla.id}/'
+        for condicion in [{'campo': 'x'}, {'campo': 'x', 'valores': []}, ['x'], {'campo': 'x', 'valores': [1]}]:
+            with self.subTest(condicion=condicion):
+                respuesta = self.client.patch(url, {'condicion': condicion}, format='json')
+                self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+        respuesta = self.client.patch(
+            url, {'condicion': {'campo': ' tipo_muestra ', 'valores': ['Lobectomía']}}, format='json'
+        )
+        self.assertEqual(respuesta.data['condicion'], {'campo': 'tipo_muestra', 'valores': ['Lobectomía']})
+        respuesta = self.client.patch(url, {'condicion': {}}, format='json')
+        self.assertEqual(respuesta.data['condicion'], {})
+
+    def test_el_detalle_de_la_patologia_trae_secciones_condiciones_y_guia(self):
+        patologia = Patologia.objects.get(nombre='Tiroides')
+        datos = self.client.get(f'/api/patologias/{patologia.id}/').data
+        self.assertTrue(datos['guia_muestreo'])
+        lateralidad = next(p for p in datos['plantillas'] if p['campo_nombre'] == 'lateralidad')
+        self.assertEqual(lateralidad['condicion']['campo'], 'tipo_muestra')
+        self.assertTrue(lateralidad['seccion'])
+
+
+class CanastillasTests(APITestCase):
+    """
+    Muestreo para histología (D-18): canastillas anidadas en el informe, como los
+    diagnósticos. Las escribe siempre el usuario. Solo datos ficticios.
+    """
+
+    URL = '/api/informes/'
+
+    def setUp(self):
+        self.patologo = Usuario.objects.create_user(
+            username='patologo_canastillas',
+            password='ClaveSegura-2026',
+            rol=Usuario.Rol.PATOLOGO,
+            registro_medico='RM-PRUEBA-0001',
+        )
+        self.client.force_authenticate(self.patologo)
+        self.patologia = Patologia.objects.create(nombre='Patología canastillas')
+        Plantilla.objects.create(
+            patologia=self.patologia, campo_nombre='localizacion', campo_label='Localización', obligatorio=True
+        )
+        self.paciente = paciente_ficticio()
+
+    def crear(self, **extra):
+        cuerpo = {
+            'patologia': self.patologia.id,
+            'paciente': self.paciente.id,
+            'datos_ingresados': {'localizacion': 'Antebrazo'},
+            **extra,
+        }
+        return self.client.post(self.URL, cuerpo, format='json')
+
+    def url(self, informe_id):
+        return f'{self.URL}{informe_id}/'
+
+    def guardadas(self, informe_id):
+        return list(Canastilla.objects.filter(informe_id=informe_id).values_list('orden', 'codigo', 'region'))
+
+    def test_registra_una_canastilla(self):
+        respuesta = self.crear(canastillas=[{'codigo': 'A', 'region': 'Punta', 'descripcion': 'Corte longitudinal'}])
+        self.assertEqual(respuesta.status_code, status.HTTP_201_CREATED, respuesta.data)
+        self.assertEqual(self.guardadas(respuesta.data['id']), [(1, 'A', 'Punta')])
+
+    def test_registra_varias_en_el_orden_enviado_y_las_devuelve_en_el_detalle(self):
+        canastillas = [
+            {'codigo': 'B', 'region': 'Base', 'cantidad': 2},
+            {'codigo': 'A', 'lesion_margen': 'Margen proximal', 'entintado': 'Azul'},
+            {'codigo': 'C', 'descripcion': 'Ganglios', 'cantidad': 0},
+        ]
+        informe_id = self.crear(canastillas=canastillas).data['id']
+        detalle = self.client.get(self.url(informe_id)).data['canastillas']
+        self.assertEqual([(c['orden'], c['codigo']) for c in detalle], [(1, 'B'), (2, 'A'), (3, 'C')])
+        self.assertEqual(detalle[1]['entintado'], 'Azul')
+        self.assertEqual(detalle[2]['cantidad'], 0)
+
+    def test_al_editar_se_reemplaza_la_lista(self):
+        informe_id = self.crear(
+            canastillas=[{'codigo': 'A', 'region': 'Punta'}, {'codigo': 'B', 'region': 'Base'}]
+        ).data['id']
+        respuesta = self.client.patch(
+            self.url(informe_id),
+            {'canastillas': [{'codigo': 'B', 'region': 'Base corregida'}, {'codigo': 'C', 'region': 'Lesión'}]},
+            format='json',
+        )
+        self.assertEqual(respuesta.status_code, status.HTTP_200_OK, respuesta.data)
+        self.assertEqual(self.guardadas(informe_id), [(1, 'B', 'Base corregida'), (2, 'C', 'Lesión')])
+
+    def test_editar_otra_parte_del_informe_no_cambia_las_canastillas(self):
+        informe_id = self.crear(canastillas=[{'codigo': 'A', 'region': 'Punta'}]).data['id']
+        self.client.patch(self.url(informe_id), {'comentarios': 'Revisado'}, format='json')
+        self.assertEqual(self.guardadas(informe_id), [(1, 'A', 'Punta')])
+
+    def test_enviar_una_lista_vacia_las_quita(self):
+        informe_id = self.crear(canastillas=[{'codigo': 'A', 'region': 'Punta'}]).data['id']
+        self.client.patch(self.url(informe_id), {'canastillas': []}, format='json')
+        self.assertEqual(self.guardadas(informe_id), [])
+
+    def test_no_se_crean_canastillas_sin_que_el_usuario_las_envie(self):
+        respuesta = self.crear()
+        self.assertEqual(respuesta.data['canastillas'], [])
+        self.assertFalse(Canastilla.objects.exists())
+
+    def test_cada_informe_lleva_las_canastillas_que_necesita(self):
+        uno = self.crear(canastillas=[{'codigo': 'A', 'region': 'Punta'}]).data['id']
+        doce = self.crear(canastillas=[{'codigo': str(n), 'region': f'Región {n}'} for n in range(1, 13)]).data['id']
+        self.assertEqual(Canastilla.objects.filter(informe_id=uno).count(), 1)
+        self.assertEqual(Canastilla.objects.filter(informe_id=doce).count(), 12)
+
+    def test_rechaza_identificaciones_repetidas_sin_importar_mayusculas(self):
+        respuesta = self.crear(canastillas=[{'codigo': 'a', 'region': 'Punta'}, {'codigo': 'A ', 'region': 'Base'}])
+        self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('repetida', str(respuesta.data['canastillas']))
+        self.assertEqual(Informe.objects.count(), 0)
+
+    def test_rechaza_una_canastilla_sin_identificacion_o_sin_contenido(self):
+        for canastilla in [{'codigo': '', 'region': 'Punta'}, {'codigo': 'A'}, {'codigo': 'A', 'motivo': 'Rutina'}]:
+            with self.subTest(canastilla=canastilla):
+                respuesta = self.crear(canastillas=[canastilla])
+                self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+                self.assertIn('canastillas', respuesta.data)
+        self.assertEqual(Informe.objects.count(), 0)
+
+    def test_rechaza_una_cantidad_negativa(self):
+        respuesta = self.crear(canastillas=[{'codigo': 'A', 'region': 'Punta', 'cantidad': -1}])
+        self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_tiene_un_tope_tecnico_alto(self):
+        canastillas = [{'codigo': str(n), 'region': 'x'} for n in range(MAX_CANASTILLAS + 1)]
+        respuesta = self.crear(canastillas=canastillas)
+        self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_un_informe_finalizado_no_cambia_sus_canastillas(self):
+        # D-3: tampoco se modifica el muestreo de un informe finalizado.
+        informe_id = self.crear(canastillas=[{'codigo': 'A', 'region': 'Punta'}]).data['id']
+        Informe.objects.filter(id=informe_id).update(estado=Informe.Estado.FINALIZADO)
+        respuesta = self.client.patch(self.url(informe_id), {'canastillas': []}, format='json')
+        self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(self.guardadas(informe_id), [(1, 'A', 'Punta')])
+
+    def test_otro_patologo_y_el_auditor_no_las_modifican(self):
+        # D-2: solo el autor o un admin edita el informe.
+        informe_id = self.crear(canastillas=[{'codigo': 'A', 'region': 'Punta'}]).data['id']
+        otro = Usuario.objects.create_user(username='otro_canastillas', password='x', rol=Usuario.Rol.PATOLOGO)
+        auditor = Usuario.objects.create_user(username='auditor_canastillas', password='x', rol=Usuario.Rol.AUDITOR)
+        for usuario in (otro, auditor):
+            with self.subTest(usuario=usuario.username):
+                self.client.force_authenticate(usuario)
+                respuesta = self.client.patch(self.url(informe_id), {'canastillas': []}, format='json')
+                self.assertEqual(respuesta.status_code, status.HTTP_403_FORBIDDEN)
+                self.assertEqual(len(self.client.get(self.url(informe_id)).data['canastillas']), 1)
+        self.assertEqual(self.guardadas(informe_id), [(1, 'A', 'Punta')])
+
+    def test_las_canastillas_no_aparecen_en_la_descripcion_ni_generan_diagnosticos(self):
+        respuesta = self.crear(
+            canastillas=[{'codigo': 'A', 'region': 'Lesión', 'descripcion': 'Tejido sospechoso de malignidad'}]
+        )
+        self.assertNotIn('sospechoso', respuesta.data['texto_generado'])
+        self.assertNotIn('Canastilla', respuesta.data['texto_generado'])
+        self.assertEqual(respuesta.data['diagnosticos'], [])
+
+    def test_el_listado_no_trae_las_canastillas(self):
+        self.crear(canastillas=[{'codigo': 'A', 'region': 'Punta'}])
+        self.assertNotIn('canastillas', self.client.get(self.URL).data['results'][0])
+
+    def test_el_detalle_no_hace_una_consulta_por_canastilla(self):
+        from django.test.utils import CaptureQueriesContext
+
+        una = self.crear(canastillas=[{'codigo': 'A', 'region': 'x'}]).data['id']
+        diez = self.crear(canastillas=[{'codigo': str(n), 'region': 'x'} for n in range(10)]).data['id']
+
+        def contar(informe_id):
+            with CaptureQueriesContext(connection) as consultas:
+                self.client.get(self.url(informe_id))
+            return len(consultas)
+
+        self.assertEqual(contar(diez), contar(una))
+
+    def test_borrar_un_borrador_borra_sus_canastillas(self):
+        informe_id = self.crear(canastillas=[{'codigo': 'A', 'region': 'Punta'}]).data['id']
+        self.assertEqual(self.client.delete(self.url(informe_id)).status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(Canastilla.objects.exists())
+
+
+class DescripcionSegunPlantillaTests(TestCase):
+    """
+    generar_descripcion_macroscopica (D-18): redacta solo lo registrado, con la etiqueta
+    real del campo cuando la frase del MAPEO no corresponde, y sin los campos que no aplican.
+    """
+
+    def setUp(self):
+        self.patologia = Patologia.objects.create(nombre='Vesícula de prueba')
+        crear = partial_plantilla(self.patologia)
+        crear('tipo_estudio', 'Tipo de colecistectomía', tipo_campo='lista', opciones=['No tumoral', 'Tumoral'])
+        crear('consistencia', 'Pared (espesor)')
+        crear('dimensiones', 'Dimensiones (cm)')
+        crear('ganglios', 'Ganglios linfáticos', tipo_campo='numero')
+        crear('necrosis', 'Necrosis', tipo_campo='boolean')
+        crear(
+            'tumor_forma',
+            'Tumor: forma',
+            condicion={'campo': 'tipo_estudio', 'valores': ['Tumoral']},
+        )
+
+    def describir(self, datos):
+        return generar_descripcion_macroscopica(self.patologia, datos)
+
+    def test_usa_la_etiqueta_si_la_frase_del_nombre_diria_otra_cosa(self):
+        texto = self.describir({'consistencia': '3 mm', 'dimensiones': '8 x 3'})
+        self.assertIn('Pared (espesor): 3 mm.', texto)
+        self.assertNotIn('La consistencia es', texto)
+        self.assertIn('Las dimensiones son 8 x 3.', texto)  # esta frase sí corresponde
+
+    def test_cero_y_no_se_redactan(self):
+        texto = self.describir({'ganglios': 0, 'necrosis': False})
+        self.assertIn('Se identifican 0 ganglio(s) linfático(s).', texto)
+        self.assertIn('Se observa necrosis: No.', texto)
+
+    def test_un_campo_vacio_no_se_menciona(self):
+        texto = self.describir({'dimensiones': '8 x 3', 'ganglios': None, 'consistencia': '  '})
+        self.assertNotIn('ganglio', texto)
+        self.assertNotIn('Pared', texto)
+
+    def test_un_campo_que_no_aplica_no_aparece_aunque_tenga_valor(self):
+        texto = self.describir({'tipo_estudio': 'No tumoral', 'tumor_forma': 'Polipoide'})
+        self.assertNotIn('Polipoide', texto)
+        texto = self.describir({'tipo_estudio': 'Tumoral', 'tumor_forma': 'Polipoide'})
+        self.assertIn('Tumor: forma: Polipoide.', texto)
+
+    def test_un_dato_antiguo_sin_plantilla_se_conserva(self):
+        self.assertIn('Clave antigua: valor.', self.describir({'clave_antigua': 'valor'}))
+
+
+def partial_plantilla(patologia):
+    """Crea plantillas de una patología con orden consecutivo (pruebas de la descripción)."""
+    contador = iter(range(1, 100))
+
+    def crear(campo_nombre, campo_label, **extra):
+        return Plantilla.objects.create(
+            patologia=patologia, campo_nombre=campo_nombre, campo_label=campo_label, orden=next(contador), **extra
+        )
+
+    return crear
+
+
+class PdfMuestreoTests(APITestCase):
+    """El PDF lleva la sección MUESTREO PARA HISTOLOGÍA solo si hay canastillas (D-18). Solo datos ficticios."""
+
+    URL = '/api/informes/'
+
+    def setUp(self):
+        self.autor = Usuario.objects.create_user(
+            username='patologo_pdf_muestreo', password='ClaveSegura-2026', rol=Usuario.Rol.PATOLOGO
+        )
+        self.client.force_authenticate(self.autor)
+        self.patologia = Patologia.objects.create(nombre='Patología PDF muestreo')
+        self.paciente = paciente_ficticio()
+
+    def crear(self, canastillas):
+        cuerpo = {
+            'patologia': self.patologia.id,
+            'paciente': self.paciente.id,
+            'datos_ingresados': {'localizacion': 'Dorso de la mano'},
+            'descripcion_microscopica': 'Texto microscópico.',
+            'canastillas': canastillas,
+        }
+        respuesta = self.client.post(self.URL, cuerpo, format='json')
+        self.assertEqual(respuesta.status_code, status.HTTP_201_CREATED, respuesta.data)
+        return respuesta.data['id']
+
+    def generar(self, informe_id):
+        from reportlab.lib.colors import toColor
+        from reportlab.pdfgen.canvas import Canvas
+        from reportlab.platypus import Paragraph
+
+        with (
+            mock.patch('informes.utils.Paragraph', wraps=Paragraph) as parrafos,
+            mock.patch.object(Canvas, 'setFillColor', autospec=True, side_effect=Canvas.setFillColor) as rellenos,
+            mock.patch.object(Canvas, 'setStrokeColor', autospec=True, side_effect=Canvas.setStrokeColor) as trazos,
+        ):
+            respuesta = self.client.get(f'{self.URL}{informe_id}/pdf/')
+        self.assertEqual(respuesta.status_code, status.HTTP_200_OK)
+        return {
+            'textos': [str(llamada.args[0]) for llamada in parrafos.call_args_list],
+            'colores': {
+                toColor(llamada.args[1]).hexval() for llamada in rellenos.call_args_list + trazos.call_args_list
+            },
+        }
+
+    def test_la_seccion_va_despues_de_la_macroscopica_y_escapa_el_texto(self):
+        informe_id = self.crear(
+            [
+                {
+                    'codigo': 'A',
+                    'region': 'Punta <b>',
+                    'descripcion': 'Corte & sección',
+                    'cantidad': 2,
+                    'motivo': 'Margen',
+                }
+            ]
+        )
+        textos = self.generar(informe_id)['textos']
+        macro, muestreo, micro = (
+            textos.index('DESCRIPCIÓN MACROSCÓPICA'),
+            textos.index('MUESTREO PARA HISTOLOGÍA'),
+            textos.index('DESCRIPCIÓN MICROSCÓPICA'),
+        )
+        self.assertLess(macro, muestreo)
+        self.assertLess(muestreo, micro)
+        self.assertIn('Punta &lt;b&gt;', textos)
+        self.assertIn('Corte &amp; sección', textos)
+        self.assertIn('Motivo: Margen', textos)
+
+    def test_sin_canastillas_no_hay_seccion(self):
+        self.assertNotIn('MUESTREO PARA HISTOLOGÍA', self.generar(self.crear([]))['textos'])
+
+    def test_la_tabla_va_en_negro(self):
+        informe_id = self.crear([{'codigo': 'A', 'region': 'Punta'}])
+        self.assertLessEqual(self.generar(informe_id)['colores'], {'0x000000', '0xc53030'})
+
+
+class AdminCanastillasTests(TestCase):
+    """En /admin/, las canastillas de un finalizado son de solo lectura, como sus diagnósticos (D-14, D-18)."""
+
+    def setUp(self):
+        superusuario = Usuario.objects.create_superuser(
+            username='super_admin_canastillas', password='ClaveSegura-2026', rol=Usuario.Rol.ADMIN
+        )
+        self.client.force_login(superusuario)
+        self.autor = Usuario.objects.create_user(
+            username='patologo_admin_canastillas', password='ClaveSegura-2026', rol=Usuario.Rol.PATOLOGO
+        )
+
+    def crear_informe(self, finalizado):
+        informe = Informe.objects.create(
+            patologia=Patologia.objects.create(nombre=f'Patología admin canastillas {finalizado}'),
+            autor=self.autor,
+            paciente=paciente_ficticio(numero=f'PRUEBA{int(finalizado)}'),
+        )
+        Canastilla.objects.create(informe=informe, orden=1, codigo='A', region='Original')
+        if finalizado:
+            informe.estado = Informe.Estado.FINALIZADO
+            informe.datos_finalizacion = informe.datos_para_congelar()
+            informe.save()
+        return informe
+
+    def guardar_ficha(self, informe, **cambios):
+        ficha = f'/admin/informes/informe/{informe.id}/change/'
+        datos = datos_formulario_admin(self.client.get(ficha))
+        datos.update(cambios)
+        return self.client.post(ficha, datos)
+
+    def test_no_se_cambian_ni_borran_las_canastillas_de_un_finalizado(self):
+        informe = self.crear_informe(finalizado=True)
+        self.guardar_ficha(informe, **{'canastillas-0-region': 'Cambiada', 'canastillas-0-DELETE': 'on'})
+        self.assertEqual(list(informe.canastillas.values_list('region', flat=True)), ['Original'])
+
+    def test_las_canastillas_de_un_borrador_se_editan(self):
+        informe = self.crear_informe(finalizado=False)
+        respuesta = self.guardar_ficha(informe, **{'canastillas-0-region': 'Cambiada'})
+        self.assertEqual(respuesta.status_code, 302)
+        self.assertEqual(informe.canastillas.get().region, 'Cambiada')

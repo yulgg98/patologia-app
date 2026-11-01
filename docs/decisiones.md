@@ -171,3 +171,16 @@ Los códigos como "I-7" o "C-2" remiten a `docs/auditoria-inicial.md`.
   - Ese backend sube el límite de peticiones por usuario con `LIMITE_PETICIONES_USUARIO`. El límite del login (O-16) no se puede cambiar. Para no gastarlo, solo `login-y-roles.cy.js` entra por la pantalla; las demás pruebas entran por la API y reutilizan la sesión (`cy.session`).
   - `npm run e2e` es un comando aparte y **no** forma parte de la regla 7: no es obligatorio antes de cada commit.
 - **Motivo:** el usuario lo eligió el 2026-10-14 entre otras opciones (usar la base de desarrollo, simular la API, o volver Cypress obligatorio en la regla 7). Una base aparte no ensucia los datos ni gasta números de petición (D-7). Las pruebas reales son las que muestran el flujo completo en la presentación. Correrlas tarda cerca de un minuto, demasiado para cada commit. El límite se volvió configurable porque, al correr todo junto, `patologo1` pasaba de las 120 peticiones por minuto y el backend respondía 429.
+
+## D-18. Plantillas según el manual de procesamiento macroscópico y muestreo para histología
+
+- **Fecha:** 2026-11-01
+- **Relacionado con:** D-3, D-4, D-14; `docs/plantillas-manual.md`
+- **Decisión:**
+  - **Fuente:** las 14 plantillas se revisan con el «Manual de procesamiento macroscópico de patología quirúrgica» (HUV – Univalle, 2.ª ed. 2021–2022). Lo que el manual deja incompleto o no documenta no se convierte en regla: queda marcado como pendiente de validación profesional (`docs/plantillas-manual.md`, sección 6).
+  - **Campos:** cada campo tiene una sección y puede tener una condición: solo aplica cuando otro campo tiene ciertos valores. Un campo que no aplica no se muestra, no se exige y no se redacta en la descripción, aunque tenga un valor guardado. Así, un campo puede ser obligatorio, obligatorio solo cuando aplica, opcional o no aplicable, según el procedimiento.
+  - **Sin borrar:** la actualización (`actualizar_plantillas`) no borra campos ni opciones de las listas y no modifica informes. Un informe que ya tenía un valor de lista lo conserva aunque la opción se quite después de la plantilla, como una EPS desactivada (D-4).
+  - **Descripción generada:** solo usa lo registrado; un campo vacío no se menciona y `0` y «No» sí. La frase de un nombre de campo (`mapeo`) se usa solo si la etiqueta del campo nombra ese concepto; si no, sale «Etiqueta: valor».
+  - **Muestreo para histología:** cada informe tiene una lista de canastillas (identificación única, región, lesión o margen, tejido, cantidad, entintado, motivo, observaciones), aparte de la descripción macroscópica. Las agrega siempre el usuario, las que el caso necesite: no hay un número fijo y el sistema no crea canastillas. La guía del manual de cada patología se muestra solo como referencia. El muestreo no es un hallazgo ni un diagnóstico: la descripción no lo menciona y el PDF lo imprime en su propia sección.
+  - **Integridad:** las canastillas de un informe finalizado no se modifican, ni por la API ni en `/admin/` (D-3, D-14).
+- **Motivo:** las plantillas exigían datos que no corresponden a todos los procedimientos (por ejemplo, márgenes en una biopsia por aguja), les faltaban datos que el manual pide y no había dónde registrar las canastillas. Un formulario que obliga a inventar datos, o que redacta un vacío como un hallazgo, compromete la fidelidad del informe.

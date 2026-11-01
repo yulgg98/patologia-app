@@ -193,10 +193,10 @@ class InformeViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         params = self.request.query_params
-        # El detalle, el PDF y finalizar devuelven los diagnósticos y las adendas: se
-        # cargan en una consulta cada uno (M-4). El listado no los muestra y no los pide.
+        # El detalle, el PDF y finalizar devuelven los diagnósticos, las canastillas (D-18) y
+        # las adendas: se cargan en una consulta cada uno (M-4). El listado no los muestra.
         if self.detail:
-            qs = qs.prefetch_related('diagnosticos', 'adendas')
+            qs = qs.prefetch_related('diagnosticos', 'canastillas', 'adendas')
 
         # Filtros de búsqueda
         # Cada palabra de ?q= debe aparecer en alguno de los campos: así "ficticio uno"

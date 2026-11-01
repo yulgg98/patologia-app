@@ -579,7 +579,8 @@ textarea {
   color: var(--gray-700);
 }
 
-.dynamic-fields + .texto-generado-titulo {
+.dynamic-fields + .texto-generado-titulo,
+.seccion-plantilla + .texto-generado-titulo {
   margin-top: 1.25rem;
 }
 .texto-generado-titulo {
@@ -604,6 +605,73 @@ textarea {
   display: flex;
   gap: 0.5rem;
   justify-content: flex-end;
+}
+
+/* Secciones de la plantilla y muestreo para histología (decisión D-18) */
+.seccion-plantilla + .seccion-plantilla {
+  margin-top: 1.25rem;
+}
+.seccion-plantilla-titulo {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--gray-600);
+  margin: 0 0 0.6rem;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--gray-200);
+}
+.field-help {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+  color: var(--gray-500);
+  line-height: 1.35;
+}
+.guia-muestreo {
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+}
+.guia-muestreo summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.guia-muestreo h3 {
+  font-size: 0.875rem;
+  margin: 0.75rem 0 0.25rem;
+}
+.guia-muestreo ul {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+.lista-canastillas {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1rem;
+}
+.canastilla-fila {
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+.canastilla-campos {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0 1rem;
+}
+.canastilla-ancha {
+  grid-column: 1 / -1;
+}
+.canastilla-titulo {
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+.canastilla-fila .diagnostico-acciones {
+  align-items: center;
 }
 
 /* ── Search form ───────────────────────────────────────── */

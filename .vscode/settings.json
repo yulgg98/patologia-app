@@ -15,5 +15,6 @@
   "[python]": {
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.codeActionsOnSave": { "source.organizeImports.ruff": "explicit" }
-  }
+  },
+  "python.terminal.useEnvFile": true
 }

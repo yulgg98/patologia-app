@@ -33,15 +33,16 @@
 
 ## Características Principales
 
-- **14 patologías preconfiguradas**: cada tipo de muestra tiene su propio formulario y su protocolo médico.
-- **Formularios dinámicos**: los campos (texto, número, lista desplegable, área de texto, sí/no) se generan según la patología elegida. Los campos obligatorios se validan en el frontend y en el backend (0 y "No" cuentan como respuestas válidas).
-- **Descripción macroscópica automática**: al guardar un informe, el backend convierte los datos del formulario en un párrafo redactado en lenguaje natural.
+- **14 patologías preconfiguradas**: cada tipo de muestra tiene su propio formulario y su protocolo médico. Las plantillas siguen el «Manual de procesamiento macroscópico de patología quirúrgica» (HUV – Univalle, 2.ª ed.); la correspondencia y lo pendiente de validar están en [`docs/plantillas-manual.md`](docs/plantillas-manual.md).
+- **Formularios dinámicos**: los campos (texto, número, lista desplegable, área de texto, sí/no) se generan según la patología elegida, agrupados por secciones. Un campo puede aplicar solo a ciertos procedimientos (por ejemplo, la lateralidad solo en una lobectomía): si no aplica, no se muestra ni se exige. Los campos obligatorios se validan en el frontend y en el backend (0 y "No" cuentan como respuestas válidas).
+- **Descripción macroscópica automática**: al guardar un informe, el backend convierte los datos del formulario en un párrafo redactado en lenguaje natural. Solo usa lo registrado: un campo vacío no se menciona.
+- **Muestreo para histología**: cada informe registra sus canastillas (identificación, región, lesión o margen, tejido, cantidad, entintado, motivo y observaciones), las que el caso necesite. Cada plantilla muestra las indicaciones del manual como referencia; el sistema nunca crea canastillas por su cuenta.
 - **Número de petición automático**: al crear un informe, el sistema le asigna un número `P-AÑO-NNNNN` (por ejemplo `P-2026-00045`). El consecutivo vuelve a 1 cada año, no se repite aunque varios usuarios guarden a la vez y no se reutiliza si se borra un borrador. Se puede anotar, de forma opcional, el número de orden de la institución remitente.
 - **Exportación a PDF**: genera con **ReportLab** un informe con la estructura de un informe real de anatomía patológica:
   - encabezado con el nombre, la dirección y el teléfono del laboratorio, que se configuran en `backend/.env` (por defecto, el de demostración: "PathoLab — Laboratorio de Patología (demostración)", "Santiago de Cali, Colombia", sin teléfono);
   - tabla de datos en dos columnas: paciente, identificación, edad (a la fecha de ingreso), sexo, médico tratante, EPS, servicio, número de petición, fechas de ingreso y de informe, orden externa (si existe) y estudios solicitados;
   - título "INFORME DE ANATOMÍA PATOLÓGICA", tipo de estudio, patología y tipo de muestra;
-  - descripción macroscópica, descripción microscópica, diagnósticos numerados con su código CIE-10 y comentarios;
+  - descripción macroscópica, muestreo para histología (tabla de canastillas, si hay), descripción microscópica, diagnósticos numerados con su código CIE-10 y comentarios;
   - firma del autor (nombre, especialidad y registro médico);
   - adendas al final, cada una con su firma, y un aviso bajo el título ("Este informe tiene 2 adendas; ver al final") para que nadie lea el diagnóstico original sin saber que se corrigió;
   - pie en cada página con el número de petición, "Página X de Y" y la hora de generación.
@@ -172,7 +173,10 @@ patologia-app/
 │   │   └── tests.py           # Pruebas de la configuración (SECRET_KEY y DEBUG)
 │   ├── informes/
 │   │   ├── management/commands/seed_data.py  # Datos iniciales: usuarios, 14 patologías, temas, servicios, EPS y 2 pacientes ficticios
-│   │   ├── models.py          # Categoria, Patologia, Plantilla, Servicio, ConsecutivoPeticion, Informe, Diagnostico, Adenda
+│   │   ├── management/commands/actualizar_plantillas.py  # Aplica las plantillas del manual a una base existente
+│   │   ├── definiciones_manual.py  # Campos, secciones, condiciones y guía de muestreo de las 14 plantillas (D-18)
+│   │   ├── reglas.py          # Cuándo aplica un campo y cómo se validan sus valores
+│   │   ├── models.py          # Categoria, Patologia, Plantilla, Servicio, ConsecutivoPeticion, Informe, Diagnostico, Canastilla, Adenda
 │   │   ├── serializers.py
 │   │   ├── admin.py           # Panel /admin/ (número de petición, datos congelados y adendas en solo lectura)
 │   │   ├── utils.py           # Generador de la descripción macroscópica y del PDF
@@ -199,9 +203,10 @@ patologia-app/
 │   │   ├── api/client.js      # Cliente Axios: dirección de la API (VITE_API_URL) y token JWT
 │   │   ├── context/AuthContext.jsx  # Sesión y rol del usuario
 │   │   ├── components/        # Navbar, Footer, FormularioPaciente, CeldaPaciente, EstadoBadge
-│   │   │   └── informe/       # Partes del informe: SelectorPaciente, DatosSolicitud, ListaDiagnosticos, SeccionFirma y SeccionAdendas
+│   │   │   └── informe/       # Partes del informe: SelectorPaciente, DatosSolicitud, ListaDiagnosticos, MuestreoHistologia, SeccionFirma y SeccionAdendas
 │   │   ├── hooks/useOpciones.js  # Listas fijas de /api/opciones/ (se piden una vez)
 │   │   ├── utils/formularios.js  # hoyISO() y conOpcionActual() (catálogos desactivados)
+│   │   ├── utils/reglas.js    # Campos que aplican y secciones de la plantilla (como backend/informes/reglas.py)
 │   │   ├── pages/             # Login, Dashboard, Informe, Buscar, Pacientes, Patologías, Catálogos,
 │   │   │                      # Foro, Detalle de publicación, Perfil y páginas legales
 │   │   ├── test/setup.js      # Configuración de las pruebas
@@ -464,22 +469,24 @@ git config blame.ignoreRevsFile .git-blame-ignore-revs
 
 ## Catálogo de Patologías Incluidas
 
-`seed_data` carga plantillas clínicas para 14 tipos de muestra:
+`seed_data` carga plantillas clínicas para 14 tipos de muestra, revisadas con el manual de procesamiento macroscópico (D-18). Cada una tiene sus campos por secciones (identificación y procedimiento, descripción macroscópica, lesiones, márgenes y estructuras, observaciones), los campos que dependen del procedimiento y la guía de muestreo del manual:
 
-1. **Biopsia de Piel**: localización, tipo de muestra (punch/escisional/incisional/shave), dimensiones, color, bordes y superficie.
-2. **Biopsia de Mama**: lateralidad, tipo de muestra, dimensiones, peso, tamaño del tumor, márgenes, ganglios y necrosis.
-3. **Apéndice Cecal**: longitud, diámetro, superficie serosa, consistencia y color.
-4. **Vesícula Biliar**: dimensiones, espesor de la pared, mucosa y cálculos.
-5. **Biopsia de Próstata**: número de cilindros, localización, longitud y PSA.
-6. **Tiroides**: lateralidad, nódulos, cápsula, dimensiones y peso.
-7. **Colon y Recto**: localización, morfología de la lesión, márgenes y ganglios.
-8. **Útero y Cérvix**: dimensiones, miomas, grosor endometrial, cuello y anexos.
-9. **Ganglio Linfático**: tipo de biopsia, localización, número, necrosis y cápsula.
-10. **Biopsia Gástrica**: región, número de fragmentos y sospecha de *H. pylori*.
-11. **Pulmón**: lateralidad, lóbulo, márgenes y compromiso pleural.
-12. **Riñón**: nefrectomía o biopsia, tamaño del tumor, cápsula y vena renal.
-13. **Amígdalas y Adenoides**: dimensiones, criptas, exudado y consistencia.
-14. **Tejido Blando**: lesión sospechada, planos anatómicos y márgenes.
+1. **Biopsia de Piel**: afeitado, sacabocado, losange/elipse, alopecia y extirpación; orientación, lesión, distancia al margen, ulceración, satélites y entintado.
+2. **Biopsia de Mama**: aguja gruesa, incisional, resecciones (con arpón) y mastectomía; cilindros, tipo de mastectomía, lesión, distancia a cada borde y entintado.
+3. **Apéndice Cecal**: no neoplásica o neoplásica; mesoapéndice, perforación, pared, contenido, tumor y mucina.
+4. **Vesícula Biliar**: no tumoral o tumoral; pared, mucosa, cálculos (número, medidas y sitio), tumor y márgenes.
+5. **Biopsia de Próstata**: biopsia por aguja, RTU, prostatectomía simple y radical; peso, dimensiones, vesículas seminales y áreas sospechosas.
+6. **Tiroides**: todas las tiroidectomías; medidas por lóbulo, paratiroides y nódulo (ubicación, aspecto, borde, distancia a la cápsula).
+7. **Colon y Recto**: polipectomía, colectomías (tumoral, no tumoral, poliposis), proctectomía y resección ano-rectal; pólipo, tumor, mesorrecto y línea pectínea.
+8. **Útero y Cérvix**: biopsias, cono, histerectomías por benignidad y radicales; cavidad, miometrio, invasión y parametrios.
+9. **Ganglio Linfático**: sospecha clínica, nivel ganglionar, número, hallazgos y conglomerados.
+10. **Biopsia Gástrica**: biopsia endoscópica y gastrectomías; curvaturas, pared, serosa, mucosa y lesión.
+11. **Pulmón**: cuña y resecciones; borde pleural, lesión y márgenes bronquial y vascular.
+12. **Riñón**: biopsia y nefrectomías; corteza, médula, pelvis, tumor, cápsula y vena renal.
+13. **Amígdalas y Adenoides**: medidas, peso, descripción externa e interna y tipo de lesión.
+14. **Tejido Blando**: lesión sospechada y, en tumores de partes blandas, localización, crecimiento, necrosis y distancia al margen.
+
+En una base que ya tenía las plantillas anteriores, `python manage.py actualizar_plantillas` aplica las nuevas sin borrar campos ni tocar los informes (`seed_data` también lo hace).
 
 ---
 
@@ -506,8 +513,8 @@ Todas las rutas exigen la cabecera `Authorization: Bearer <token>`, excepto el l
 | GET / POST | `/api/categorias/` | Listar o crear categorías (`?search=`) | Leer: todos · Escribir: patólogo/admin |
 | GET / PUT / PATCH / DELETE | `/api/categorias/{id}/` | Ver, editar o borrar una categoría (no se borra si tiene patologías) | Igual |
 | GET / POST | `/api/patologias/` | Listar o crear patologías (`?categoria=`, `?search=`, `?activa=true`/`false`) | Igual |
-| GET / PUT / PATCH / DELETE | `/api/patologias/{id}/` | Detalle con sus campos de plantilla. No se borra si tiene informes (400) | Igual |
-| GET / POST | `/api/plantillas/` | Listar o crear campos de formulario (`?patologia=`) | Igual |
+| GET / PUT / PATCH / DELETE | `/api/patologias/{id}/` | Detalle con sus campos de plantilla y `guia_muestreo` (indicaciones del manual, solo referencia). No se borra si tiene informes (400) | Igual |
+| GET / POST | `/api/plantillas/` | Listar o crear campos de formulario (`?patologia=`). Cada campo trae `seccion`, `condicion` (`{"campo": "<campo_nombre>", "valores": [...]}`, o `{}` si siempre aplica) y `ayuda` | Igual |
 | GET / PUT / PATCH / DELETE | `/api/plantillas/{id}/` | Ver, editar o borrar un campo | Igual |
 | GET / POST | `/api/servicios/` | Listar o crear servicios (`?search=`, `?activo=true`/`false`). El nombre no se puede repetir, sin importar mayúsculas ni espacios | Igual |
 | GET / PUT / PATCH / DELETE | `/api/servicios/{id}/` | Ver, editar, desactivar (`activo: false`) o borrar un servicio | Igual |
@@ -561,6 +568,10 @@ Contenido del informe (etapa 5 del informe v2):
 - `codigo_cie10` es opcional. Se pasa a mayúsculas, se quitan los espacios y se agrega el punto si falta (`c443` → `C44.3`). Debe ser una letra, dos cifras y, si aplica, un punto con uno o dos caracteres (`C44`, `C44.3`, `M80.90`); si no → 400.
 - Un borrador se puede guardar sin diagnósticos.
 
+Plantillas y muestreo para histología (decisión D-18):
+- `datos_ingresados` se valida con las reglas de la plantilla: solo se exigen los obligatorios que **aplican** al procedimiento (según `condicion`); un número no puede ser negativo ni texto; un valor de lista debe estar entre las opciones, salvo que el informe ya lo tuviera guardado. Un campo que no aplica no se valida ni se redacta.
+- `canastillas`: lista de `{"codigo": "A", "region": "...", "lesion_margen": "...", "descripcion": "...", "cantidad": 2, "entintado": "...", "motivo": "...", "observaciones": "..."}` en orden (al leerla, cada una trae también su `orden`). Si se envía, **reemplaza** a la lista anterior; si no se envía, no cambia. `codigo` es obligatorio y no se repite en el informe (sin importar mayúsculas); cada canastilla necesita al menos `region`, `lesion_margen` o `descripcion`; `cantidad` es opcional (0 o más). Máximo 200. En un informe finalizado no cambian. El listado no las trae.
+
 Firma y finalización (etapa 6 del informe v2):
 - Para finalizar: el informe tiene paciente y al menos un diagnóstico, el autor tiene `registro_medico` (aunque finalice un admin, cuenta el del autor) y, si `tipo_estudio` es `histologia`, `descripcion_microscopica` no está vacía. Un borrador se puede guardar sin cumplirlos.
 - `fecha_informe`: la fija `finalizar`; es `null` en un borrador. No se puede escribir por la API.
@@ -600,7 +611,7 @@ graph TD
     P --> S[Datos de la solicitud y tipo de estudio]
     S --> E[Seleccionar patología]
     E --> F[Se carga el formulario de la plantilla]
-    F --> G[Llenar la macroscópica, la microscópica, los diagnósticos y los comentarios]
+    F --> G[Llenar la macroscópica, las canastillas del muestreo, la microscópica, los diagnósticos y los comentarios]
     G --> H[Guardar como borrador: se asigna el número de petición]
     H --> I[El backend genera la descripción macroscópica]
     I --> V[Vista previa en PDF del borrador: solo el autor o un admin]
@@ -661,6 +672,7 @@ La [auditoría de seguridad OWASP Top 10:2025](docs/auditoria-owasp.md) (2026-10
 | [`docs/auditoria-inicial.md`](docs/auditoria-inicial.md) | Auditoría del código, con el estado de cada hallazgo |
 | [`docs/auditoria-owasp.md`](docs/auditoria-owasp.md) | Auditoría de seguridad según OWASP Top 10:2025, con los hallazgos `O-x` |
 | [`docs/decisiones.md`](docs/decisiones.md) | Decisiones de diseño y de reglas de negocio |
+| [`docs/plantillas-manual.md`](docs/plantillas-manual.md) | Correspondencia de las 14 plantillas con el manual de procesamiento macroscópico, canastillas y lo pendiente de validar |
 | [`docs/propuesta-informe-v2.md`](docs/propuesta-informe-v2.md) | Diseño del informe de anatomía patológica v2 (pacientes, solicitud, diagnósticos, firma, PDF y adendas) |
 | [`docs/plan-calidad-y-diseno.md`](docs/plan-calidad-y-diseno.md) | Plan por fases: herramientas de calidad, auditoría OWASP, guía de diseño y rediseño de la interfaz |
 | [`docs/progreso.md`](docs/progreso.md) | Estado actual del trabajo, pendientes y próximos pasos |

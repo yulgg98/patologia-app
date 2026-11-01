@@ -3,6 +3,35 @@
 Todos los cambios de código del proyecto se documentan aquí, del más reciente al más antiguo.
 Cada entrada indica la fecha, qué se cambió y por qué. Los códigos como "C-1" remiten a `docs/auditoria-inicial.md`.
 
+## 2026-11-01
+
+### Plantillas según el manual de procesamiento macroscópico y muestreo para histología (D-18)
+
+**Qué se cambió:**
+- **Plantillas:** las 14 se revisaron con el «Manual de procesamiento macroscópico de patología quirúrgica» (HUV – Univalle, 2.ª ed.). La matriz de correspondencia, los campos de cada una y lo pendiente de validar están en `docs/plantillas-manual.md`.
+  - `backend/informes/definiciones_manual.py` (nuevo): campos, secciones, condiciones, ayudas y guía de muestreo de cada plantilla. De 124 campos se pasa a 260; no se borró ninguno.
+  - `python manage.py actualizar_plantillas` (nuevo, `--simular` para probar): aplica las definiciones a una base existente. Es idempotente, solo agrega opciones a las listas, deja juntos los campos de cada sección y no toca los informes. `seed_data` lo llama al final.
+- **Modelos (migración `informes/0014`, solo agrega):**
+  - `Plantilla.seccion`, `Plantilla.condicion` (`{"campo": ..., "valores": [...]}`) y `Plantilla.ayuda`;
+  - `Patologia.guia_muestreo`;
+  - modelo nuevo `Canastilla` (`informe`, `orden`, `codigo` único por informe, `region`, `lesion_margen`, `descripcion`, `cantidad`, `entintado`, `motivo`, `observaciones`).
+- **Validación** (`backend/informes/reglas.py`, nuevo): `InformeSerializer` exige solo los obligatorios que aplican al procedimiento elegido, rechaza números negativos o no numéricos y valores que no están en la lista. Un valor de lista ya guardado se conserva aunque la opción se haya quitado (como D-4). `PlantillaSerializer` valida el formato de `condicion`.
+- **Canastillas en la API:** `canastillas` va anidado en `InformeSerializer` como `diagnosticos`: si se envía, reemplaza la lista en la misma transacción; si no, no cambia. Identificación obligatoria y sin repetir (sin importar mayúsculas), al menos región, lesión o descripción, cantidad de 0 o más (antes de este arreglo un negativo respondía 500), máximo `MAX_CANASTILLAS` (200). Se cargan con `prefetch_related` solo en el detalle. En un finalizado no cambian (D-3); en `/admin/`, `CanastillaInline` es de solo lectura para un finalizado (D-14).
+- **Descripción macroscópica** (`backend/informes/utils.py`): omite los campos que no aplican; redacta `0` y «No» (antes se omitían); usa la etiqueta real en lugar del nombre técnico; y usa la frase del `mapeo` solo si la etiqueta nombra ese concepto (`RAICES_MAPEO`). Así, en Vesícula Biliar ya no dice «La consistencia es 3 mm», sino «Pared (espesor): 3 mm.». Las canastillas no se mencionan.
+- **PDF:** sección «MUESTREO PARA HISTOLOGÍA» después de la macroscópica, en una tabla en negro, solo si hay canastillas. El texto pasa por `texto_seguro()`.
+- **Frontend:**
+  - `InformePage.jsx`: campos agrupados por sección, solo los que aplican, con su texto de ayuda; se exige solo lo que aplica; un `0` guardado ya se ve (antes salía vacío) y cuenta como respuesta; tarjeta «Muestreo para histología» cuando hay patología elegida.
+  - `components/informe/MuestreoHistologia.jsx` (nuevo): agregar (con la letra libre sugerida), editar y quitar canastillas con confirmación; guía del manual desplegable; errores por fila como los de DRF; solo lectura en un finalizado.
+  - `utils/reglas.js` (nuevo): `camposAplicables()` (la misma regla que `reglas.py`), `agruparPorSeccion()` y `esVacio()`.
+  - `index.css`: estilos de las secciones, la ayuda, la guía y las canastillas.
+- **Ruff:** `ruff.toml` exime `informes/definiciones_manual.py` de E501, como `seed_data.py` (es una tabla de datos).
+- **Pruebas:**
+  - Backend: 55 nuevas (reglas, comando, validación por procedimiento, canastillas, descripción, PDF y `/admin/`). Total: 377, todas en verde.
+  - Frontend: 20 nuevas (`utils/reglas.test.js`, `MuestreoHistologia.test.jsx` y un bloque en `InformePage.test.jsx`).
+- **Documentación:** `docs/plantillas-manual.md` (nuevo), D-18 en `docs/decisiones.md`, `README.md`, `CLAUDE.md` y `docs/progreso.md`.
+
+**Por qué:** las plantillas exigían datos que no corresponden a todos los procedimientos, les faltaban datos que el manual pide y no había dónde registrar el muestreo para histología. La descripción redactaba algunos campos con un significado que no tenían.
+
 ## 2026-10-14
 
 ### Fase de Cypress: modo presentación y advertencias de la terminal

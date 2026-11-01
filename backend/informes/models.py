@@ -76,6 +76,14 @@ class Patologia(models.Model):
         verbose_name='Protocolo médico',
         help_text='Protocolo médico asociado a esta patología.',
     )
+    # Indicaciones del manual para el muestreo histológico (D-18): [{titulo, items: [...]}].
+    # Son solo una referencia para el patólogo: nunca crean canastillas.
+    guia_muestreo = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name='Guía de muestreo para histología',
+        help_text='Lista de {"titulo": ..., "items": [...]} con las indicaciones del manual (solo referencia).',
+    )
     activa = models.BooleanField(default=True)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     fecha_actualizacion = models.DateTimeField(auto_now=True)
@@ -122,6 +130,22 @@ class Plantilla(models.Model):
     )
     orden = models.PositiveIntegerField(default=0, verbose_name='Orden')
     valor_defecto = models.CharField(max_length=255, blank=True, verbose_name='Valor por defecto')
+    # Organización y aplicabilidad del campo según el manual de procesamiento macroscópico (D-18).
+    seccion = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name='Sección',
+        help_text='Agrupa el campo en el formulario y en la descripción (p. ej. «Lesiones»).',
+    )
+    # Vacía: el campo siempre aplica. {"campo": "<campo_nombre>", "valores": [...]}: solo se
+    # muestra y se valida cuando ese otro campo tiene alguno de esos valores (informes/reglas.py).
+    condicion = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name='Condición de aplicabilidad',
+        help_text='{"campo": "<campo_nombre>", "valores": [...]}; vacía si el campo siempre aplica.',
+    )
+    ayuda = models.TextField(blank=True, verbose_name='Texto de ayuda')
 
     class Meta:
         verbose_name = 'Plantilla'
@@ -457,3 +481,49 @@ class Adenda(models.Model):
 
     def __str__(self):
         return f'Adenda N.º {self.numero} de {self.informe.numero_peticion}'
+
+
+class Canastilla(models.Model):
+    """
+    Muestreo para histología (D-18): qué tejido se envió a procesar y en qué canastilla.
+    La crea siempre el usuario: el sistema no genera canastillas ni su contenido. No es
+    un hallazgo ni un diagnóstico. Como los diagnósticos, se reemplaza la lista completa
+    al guardar el informe, y en un informe finalizado no cambia (D-3, D-14).
+    """
+
+    informe = models.ForeignKey(
+        Informe,
+        on_delete=models.CASCADE,
+        related_name='canastillas',
+        verbose_name='Informe',
+    )
+    orden = models.PositiveSmallIntegerField(verbose_name='Orden')
+    codigo = models.CharField(
+        max_length=20,
+        verbose_name='Identificación',
+        help_text='Código de la canastilla en el laboratorio (A, B, 1, 2...).',
+    )
+    region = models.CharField(max_length=200, blank=True, verbose_name='Región o estructura anatómica')
+    lesion_margen = models.CharField(max_length=200, blank=True, verbose_name='Lesión o margen relacionado')
+    descripcion = models.TextField(blank=True, verbose_name='Descripción del tejido muestreado')
+    cantidad = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        verbose_name='Cantidad',
+        help_text='Fragmentos, cortes, ganglios o cilindros enviados en la canastilla (opcional).',
+    )
+    entintado = models.CharField(max_length=200, blank=True, verbose_name='Entintado u orientación')
+    motivo = models.CharField(max_length=200, blank=True, verbose_name='Motivo o tipo de muestreo')
+    observaciones = models.TextField(blank=True, verbose_name='Observaciones')
+
+    class Meta:
+        verbose_name = 'Canastilla'
+        verbose_name_plural = 'Canastillas'
+        ordering = ['informe', 'orden']
+        constraints = [
+            models.UniqueConstraint(fields=['informe', 'orden'], name='canastilla_orden_unico'),
+            models.UniqueConstraint(fields=['informe', 'codigo'], name='canastilla_codigo_unico'),
+        ]
+
+    def __str__(self):
+        return f'Canastilla {self.codigo} de {self.informe.numero_peticion}'

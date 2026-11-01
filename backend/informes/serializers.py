@@ -6,26 +6,16 @@ from rest_framework import serializers
 
 from config.catalogos import NombreCatalogoMixin
 
-from .models import Adenda, Categoria, Diagnostico, Informe, Patologia, Plantilla, Servicio
+from .models import Adenda, Canastilla, Categoria, Diagnostico, Informe, Patologia, Plantilla, Servicio
+from .reglas import validar_datos
 from .utils import generar_descripcion_macroscopica
 
 MAX_DIAGNOSTICOS = 20
+# Tope técnico de canastillas por informe, como MAX_DIAGNOSTICOS (O-23): el manual no fija un
+# máximo (una poliposis lleva 10 a 12 y un tumor de Wilms todo su mapeo), así que queda muy alto.
+MAX_CANASTILLAS = 200
 # Letra, dos cifras y, opcionalmente, un punto con uno o dos caracteres: C44, C44.3, M80.90.
 PATRON_CIE10 = re.compile(r'^[A-Z][0-9]{2}(\.[0-9A-Z]{1,2})?$')
-
-
-def esta_vacio(valor):
-    """
-    Indica si un campo del formulario quedó sin responder. 0 y False son
-    respuestas válidas (por ejemplo, "0 ganglios" o "No").
-    """
-    if valor is None:
-        return True
-    if isinstance(valor, str):
-        return not valor.strip()
-    if isinstance(valor, (list, dict)):
-        return len(valor) == 0
-    return False
 
 
 class CategoriaSerializer(serializers.ModelSerializer):
@@ -64,8 +54,30 @@ class PlantillaSerializer(serializers.ModelSerializer):
             'opciones',
             'orden',
             'valor_defecto',
+            'seccion',
+            'condicion',
+            'ayuda',
         ]
         read_only_fields = ['id']
+
+    def validate_condicion(self, valor):
+        """Vacía, o {"campo": "<campo_nombre>", "valores": [...]} (informes/reglas.py, D-18)."""
+        if not valor:
+            return {}
+        campo = valor.get('campo') if isinstance(valor, dict) else None
+        valores = valor.get('valores') if isinstance(valor, dict) else None
+        if (
+            not isinstance(campo, str)
+            or not campo.strip()
+            or not isinstance(valores, list)
+            or not valores
+            or set(valor) != {'campo', 'valores'}
+            or not all(isinstance(v, str) for v in valores)
+        ):
+            raise serializers.ValidationError(
+                'Use {"campo": "<nombre del campo>", "valores": ["...", ...]} o déjela vacía.'
+            )
+        return {'campo': campo.strip(), 'valores': valores}
 
 
 class PatologiaSerializer(serializers.ModelSerializer):
@@ -81,6 +93,7 @@ class PatologiaSerializer(serializers.ModelSerializer):
             'categoria_nombre',
             'descripcion',
             'protocolo_medico',
+            'guia_muestreo',
             'activa',
             'plantillas',
             'fecha_creacion',
@@ -142,6 +155,45 @@ class DiagnosticoSerializer(serializers.ModelSerializer):
         return codigo
 
 
+class CanastillaSerializer(serializers.ModelSerializer):
+    """
+    Una canastilla del muestreo para histología (D-18). El orden es el de la lista que se
+    envía. La escribe siempre el usuario: el sistema no genera canastillas ni su contenido.
+    """
+
+    class Meta:
+        model = Canastilla
+        fields = [
+            'orden',
+            'codigo',
+            'region',
+            'lesion_margen',
+            'descripcion',
+            'cantidad',
+            'entintado',
+            'motivo',
+            'observaciones',
+        ]
+        read_only_fields = ['orden']
+        extra_kwargs = {
+            'codigo': {'error_messages': {'blank': 'Escriba la identificación de la canastilla.'}},
+            # DRF no copia el mínimo de PositiveSmallIntegerField: un negativo llegaba a la
+            # base y respondía 500 en vez de 400.
+            'cantidad': {'min_value': 0, 'max_value': 32767},
+        }
+
+    def validate_codigo(self, valor):
+        return valor.strip()
+
+    def validate(self, data):
+        # Una canastilla solo con su código no dice qué se envió.
+        if not any((data.get(campo) or '').strip() for campo in ('region', 'lesion_margen', 'descripcion')):
+            raise serializers.ValidationError(
+                {'region': 'Indique la región, la lesión o margen, o la descripción del tejido muestreado.'}
+            )
+        return data
+
+
 class AdendaSerializer(serializers.ModelSerializer):
     """
     Adenda de un informe finalizado (decisión D-9). Solo se escriben el motivo y el
@@ -165,6 +217,8 @@ class InformeSerializer(serializers.ModelSerializer):
     firma = serializers.SerializerMethodField()
     # Si se envía, reemplaza la lista anterior; si no se envía (p. ej. un PATCH), no cambia.
     diagnosticos = DiagnosticoSerializer(many=True, required=False)
+    # Igual que los diagnósticos: si se envía, reemplaza la lista; si no, no cambia (D-18).
+    canastillas = CanastillaSerializer(many=True, required=False)
     # Se agregan con POST /api/informes/{id}/adendas/; aquí solo se leen (D-9).
     adendas = AdendaSerializer(many=True, read_only=True)
 
@@ -192,6 +246,7 @@ class InformeSerializer(serializers.ModelSerializer):
             'tipo_muestra',
             'datos_ingresados',
             'texto_generado',
+            'canastillas',
             'descripcion_microscopica',
             'diagnosticos',
             'comentarios',
@@ -251,6 +306,15 @@ class InformeSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(f'Un informe admite como máximo {MAX_DIAGNOSTICOS} diagnósticos.')
         return valor
 
+    def validate_canastillas(self, valor):
+        if len(valor) > MAX_CANASTILLAS:
+            raise serializers.ValidationError(f'Un informe admite como máximo {MAX_CANASTILLAS} canastillas.')
+        codigos = [c['codigo'].upper() for c in valor]
+        repetidos = sorted({c for c in codigos if codigos.count(c) > 1})
+        if repetidos:
+            raise serializers.ValidationError(f'Identificación de canastilla repetida: {", ".join(repetidos)}.')
+        return valor
+
     def validate(self, data):
         self._validar_paciente_y_fecha_ingreso(data)
         self._validar_campos_obligatorios(data)
@@ -261,18 +325,23 @@ class InformeSerializer(serializers.ModelSerializer):
     # guardar, y si fallaba quedaba un informe a medias con su número gastado (O-23).
     def create(self, validated_data):
         diagnosticos = validated_data.pop('diagnosticos', [])
+        canastillas = validated_data.pop('canastillas', [])
         with transaction.atomic():
             informe = super().create(validated_data)
             self._guardar_diagnosticos(informe, diagnosticos)
+            self._guardar_canastillas(informe, canastillas)
             self._generar_texto(informe)
         return informe
 
     def update(self, instance, validated_data):
         diagnosticos = validated_data.pop('diagnosticos', None)
+        canastillas = validated_data.pop('canastillas', None)
         with transaction.atomic():
             informe = super().update(instance, validated_data)
             if diagnosticos is not None:
                 self._guardar_diagnosticos(informe, diagnosticos)
+            if canastillas is not None:
+                self._guardar_canastillas(informe, canastillas)
             self._generar_texto(informe)
         return informe
 
@@ -286,6 +355,13 @@ class InformeSerializer(serializers.ModelSerializer):
         informe.diagnosticos.all().delete()
         Diagnostico.objects.bulk_create(
             Diagnostico(informe=informe, orden=orden, **datos) for orden, datos in enumerate(diagnosticos, start=1)
+        )
+
+    def _guardar_canastillas(self, informe, canastillas):
+        """Reemplaza las canastillas del informe; el orden es el de la lista (1, 2, 3...)."""
+        informe.canastillas.all().delete()
+        Canastilla.objects.bulk_create(
+            Canastilla(informe=informe, orden=orden, **datos) for orden, datos in enumerate(canastillas, start=1)
         )
 
     def _validar_paciente_y_fecha_ingreso(self, data):
@@ -310,26 +386,22 @@ class InformeSerializer(serializers.ModelSerializer):
             )
 
     def _validar_campos_obligatorios(self, data):
-        """Comprueba que estén llenos los campos obligatorios de la plantilla de la patología."""
+        """
+        Revisa los datos del formulario con las reglas de su plantilla (informes/reglas.py, D-18):
+        obligatorios que aplican, números y opciones de lista. Un campo que no aplica al
+        procedimiento elegido no se exige.
+        """
         patologia = data.get('patologia') or (self.instance and self.instance.patologia)
-        # Si la petición no trae datos_ingresados (p. ej. un PATCH que solo cambia las
+        guardados = self.instance.datos_ingresados if self.instance else {}
+        # Si la petición no trae datos_ingresados (p. ej. un PATCH que solo cambia los
         # comentarios), se validan los datos ya guardados del informe.
-        if 'datos_ingresados' in data:
-            datos = data['datos_ingresados'] or {}
-        else:
-            datos = self.instance.datos_ingresados if self.instance else {}
+        datos = (data['datos_ingresados'] or {}) if 'datos_ingresados' in data else guardados
 
         # Antes era "if patologia and datos": con datos vacíos no se validaba nada (auditoría I-2).
         if patologia:
-            faltantes = [
-                campo.campo_label or campo.campo_nombre
-                for campo in patologia.plantillas.filter(obligatorio=True)
-                if esta_vacio(datos.get(campo.campo_nombre))
-            ]
-            if faltantes:
-                raise serializers.ValidationError(
-                    {'datos_ingresados': f'Faltan campos obligatorios: {", ".join(faltantes)}'}
-                )
+            errores = validar_datos(patologia.plantillas.all(), datos, guardados)
+            if errores:
+                raise serializers.ValidationError({'datos_ingresados': ' '.join(errores)})
 
 
 class InformeListSerializer(serializers.ModelSerializer):

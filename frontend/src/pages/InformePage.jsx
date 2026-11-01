@@ -6,10 +6,16 @@ import EstadoBadge from '../components/EstadoBadge';
 import SelectorPaciente from '../components/informe/SelectorPaciente';
 import DatosSolicitud from '../components/informe/DatosSolicitud';
 import ListaDiagnosticos, { conClaves, sinClaves } from '../components/informe/ListaDiagnosticos';
+import MuestreoHistologia, {
+  conClaves as canastillasConClaves,
+  sinClaves as canastillasSinClaves,
+  erroresCanastillas,
+} from '../components/informe/MuestreoHistologia';
 import SeccionFirma from '../components/informe/SeccionFirma';
 import SeccionAdendas from '../components/informe/SeccionAdendas';
 import useOpciones from '../hooks/useOpciones';
 import { conOpcionActual, hoyISO } from '../utils/formularios';
+import { agruparPorSeccion, camposAplicables, esVacio } from '../utils/reglas';
 
 // Datos de la solicitud (informe v2, etapa 4) con los nombres de campo de la API.
 const solicitudVacia = () => ({
@@ -65,6 +71,9 @@ export default function InformePage() {
   const [microscopica, setMicroscopica] = useState('');
   const [diagnosticos, setDiagnosticos] = useState([]);
   const [comentarios, setComentarios] = useState('');
+  // Muestreo para histología (D-18): canastillas e indicaciones del manual de la patología.
+  const [canastillas, setCanastillas] = useState([]);
+  const [guiaMuestreo, setGuiaMuestreo] = useState([]);
   const [informe, setInforme] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -175,6 +184,7 @@ export default function InformePage() {
           setTipoMuestra(data.tipo_muestra || '');
           setMicroscopica(data.descripcion_microscopica || '');
           setDiagnosticos(conClaves(data.diagnosticos));
+          setCanastillas(canastillasConClaves(data.canastillas));
           setComentarios(data.comentarios || '');
           setFormData(data.datos_ingresados || {});
           setSelectedPatologia(data.patologia);
@@ -191,6 +201,7 @@ export default function InformePage() {
         .get(`/patologias/${selectedPatologia}/`)
         .then(({ data }) => {
           setPlantillas(data.plantillas || []);
+          setGuiaMuestreo(data.guia_muestreo || []);
           // Valores por defecto de los campos
           if (!isEditing) {
             const defaults = {};
@@ -208,6 +219,7 @@ export default function InformePage() {
         });
     } else {
       setPlantillas([]);
+      setGuiaMuestreo([]);
     }
   }, [selectedPatologia, isEditing]);
 
@@ -241,11 +253,13 @@ export default function InformePage() {
     if (!paciente) newErrors.paciente = 'Seleccione un paciente.';
     if (!selectedPatologia) newErrors.patologia = 'Seleccione una patología.';
 
+    // Solo se exigen los obligatorios que aplican al procedimiento elegido (D-18); 0 y
+    // "No" son respuestas válidas, como en el backend.
+    const aplican = camposAplicables(plantillas, formData);
     plantillas
-      .filter((p) => p.obligatorio)
+      .filter((p) => p.obligatorio && aplican.has(p.campo_nombre))
       .forEach((p) => {
-        const val = formData[p.campo_nombre];
-        if (!val || (typeof val === 'string' && !val.trim())) {
+        if (esVacio(formData[p.campo_nombre])) {
           newErrors[p.campo_nombre] = `${p.campo_label || p.campo_nombre} es obligatorio.`;
         }
       });
@@ -255,6 +269,8 @@ export default function InformePage() {
       d.descripcion.trim() ? {} : { descripcion: 'Escriba la descripción del diagnóstico.' },
     );
     if (erroresDiagnosticos.some((e) => e.descripcion)) newErrors.diagnosticos = erroresDiagnosticos;
+    const erroresMuestreo = erroresCanastillas(canastillas);
+    if (erroresMuestreo) newErrors.canastillas = erroresMuestreo;
     return newErrors;
   };
 
@@ -276,6 +292,7 @@ export default function InformePage() {
     datos_ingresados: formData,
     descripcion_microscopica: microscopica,
     diagnosticos: sinClaves(diagnosticos),
+    canastillas: canastillasSinClaves(canastillas),
     comentarios,
   });
 
@@ -292,7 +309,10 @@ export default function InformePage() {
   // ("c443" → "C44.3"); se aplican solo si no hubo cambios mientras se guardaba.
   const alGuardarExistente = (data, versionInicio) => {
     setInforme(data);
-    if (versionRef.current === versionInicio) setDiagnosticos(conClaves(data.diagnosticos));
+    if (versionRef.current === versionInicio) {
+      setDiagnosticos(conClaves(data.diagnosticos));
+      setCanastillas(canastillasConClaves(data.canastillas));
+    }
     setVersionGuardada(versionInicio);
   };
 
@@ -450,8 +470,9 @@ export default function InformePage() {
   };
 
   const renderField = (plantilla) => {
-    const { campo_nombre, campo_label, tipo_campo, opciones, obligatorio } = plantilla;
-    const value = formData[campo_nombre] || '';
+    const { campo_nombre, campo_label, tipo_campo, opciones, obligatorio, ayuda } = plantilla;
+    // ?? y no ||: un 0 guardado se debe ver (antes se mostraba vacío).
+    const value = formData[campo_nombre] ?? '';
     const error = errors[campo_nombre];
     const disabled = informe?.estado === 'finalizado' || !puedeEditar;
 
@@ -521,10 +542,15 @@ export default function InformePage() {
           </label>
         )}
 
+        {ayuda && <span className="field-help">{ayuda}</span>}
         {error && <span className="field-error">{error}</span>}
       </div>
     );
   };
+
+  // Campos agrupados por sección; los que no aplican al procedimiento elegido no se muestran (D-18).
+  const aplican = camposAplicables(plantillas, formData);
+  const secciones = agruparPorSeccion(plantillas.filter((p) => aplican.has(p.campo_nombre)));
 
   if (loading)
     return (
@@ -700,7 +726,12 @@ export default function InformePage() {
               <h2>Descripción macroscópica</h2>
             </div>
             <div className="card-body">
-              {plantillas.length > 0 && <div className="dynamic-fields">{plantillas.map(renderField)}</div>}
+              {secciones.map((seccion) => (
+                <section key={seccion.nombre || 'sin-seccion'} className="seccion-plantilla">
+                  {seccion.nombre && <h3 className="seccion-plantilla-titulo">{seccion.nombre}</h3>}
+                  <div className="dynamic-fields">{seccion.campos.map(renderField)}</div>
+                </section>
+              ))}
               {informe?.texto_generado && (
                 <>
                   <h3 className="texto-generado-titulo">Texto generado</h3>
@@ -709,6 +740,21 @@ export default function InformePage() {
               )}
             </div>
           </div>
+        )}
+
+        {/* El muestreo va aparte de la macroscópica: es lo que se envió a procesar (D-18). */}
+        {selectedPatologia && (
+          <MuestreoHistologia
+            canastillas={canastillas}
+            onCambiar={(lista) => {
+              marcarCambio();
+              setCanastillas(lista);
+              setErrors((prev) => ({ ...prev, canastillas: null }));
+            }}
+            disabled={soloLectura}
+            guia={guiaMuestreo}
+            error={errors.canastillas}
+          />
         )}
 
         <div className="card">

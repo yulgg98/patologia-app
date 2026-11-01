@@ -18,3 +18,5 @@ select = ["E", "W", "F", "I", "B", "DJ"]
 [lint.per-file-ignores]
 # Tablas de datos de las plantillas: partirlas las haría más difíciles de leer.
 "informes/management/commands/seed_data.py" = ["E501"]
+# Lo mismo con las definiciones de las plantillas según el manual (decisión D-18).
+"informes/definiciones_manual.py" = ["E501"]
