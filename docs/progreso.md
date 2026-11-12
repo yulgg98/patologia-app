@@ -5,16 +5,19 @@ Este archivo dice **en qué quedamos**. Se actualiza al terminar cada tarea para
 - **Decisiones tomadas:** `docs/decisiones.md`.
 - **Lista completa de problemas:** `docs/auditoria-inicial.md`.
 
-**Última actualización:** 2026-11-01
+**Última actualización:** 2026-11-12
 
 ---
 
 ## Dónde estamos
 
 - **Proyecto:** `C:\Users\yulia_z9mxe\patologia-app` (desde el 2026-11-01; antes `C:\Users\salam\Desktop\patolab-app-actualizado\patologia-app`).
+- **Repositorio:** `origin` es `https://github.com/yulgg98/patologia-app.git` (donde se hace `push`); `upstream` es el repositorio original, `https://github.com/juansalamanca01-glitch/patologia-app.git`. Comprobado el 2026-11-12: `main` local y `origin/main` están en `6612d73` (D-19).
+- **Herramienta:** desde el 2026-11-12 el trabajo se hace con Claude Code en una terminal del computador del usuario, abierta en la carpeta del proyecto, para poder correr las pruebas y `git` en cada paso.
 - **Plan vigente:** `docs/plan-calidad-y-diseno.md`, aprobado el 2026-10-08. Cada fase va en su propia rama desde `main`.
-- **Trabajo en curso (2026-11-01):** CORS estricto, bloqueo con 403 de los orígenes no permitidos y documentación Swagger (D-19, `docs/cors-y-swagger.md`), pedido para la clase de Programación Web 2. Hecho en `main`, como D-18. Los cambios están escritos en la carpeta del proyecto, pero **falta el commit**: el usuario debe instalar los paquetes nuevos (`pip install -r requirements-dev.txt` con el venv activado) y ejecutar `npm run check` y todas las pruebas (regla 7). En la sesión de trabajo pasaron las 395 del backend, las 24 de la raíz y Ruff, y se comprobó en Chromium que Swagger carga y que una página de otro origen queda bloqueada.
-- **Trabajo anterior (2026-11-01):** plantillas según el manual de procesamiento macroscópico y muestreo para histología (D-18, `docs/plantillas-manual.md`), hecho directamente en `main` (sin rama propia, por elección del usuario el 2026-11-01). El usuario ejecutó en su computador `npm run check` y todas las pruebas (23 de la raíz, 377 del backend y 157 del frontend, todas en verde), hizo el commit `aa1e2ba` y lo subió a GitHub. Falta la prueba manual en el navegador y la revisión del patólogo (siguiente paso 0). Nota: las pruebas del backend fallan con Python 3.14, porque Django 4.2 no es compatible con esa versión; el entorno virtual (`venv`) se debe crear con Python 3.12 (`py -3.12 -m venv venv`).
+- **Trabajo en curso (2026-11-12):** mejoras de PathoLab para cumplir los objetivos del proyecto de investigación (OE2 y OE3). Las instrucciones completas del usuario están en `docs/mejoras-objetivos-investigacion.md`: 8 tareas, en orden, con reglas obligatorias (no borrar nada sin autorización escrita, migraciones solo aditivas, no inventar contenido clínico, una rama por tarea desde `main`). **Todavía no se ha tocado código.** Lo primero es la línea base: `npm run check` y todas las pruebas (raíz, backend y frontend) sobre `main` limpio, anotando cuántas pasan. Si algo ya falla, se avisa al usuario y no se sigue. Después, la tarea 1 en la rama `texto-macroscopico-editable`, con las decisiones del usuario de la sección "Decisiones del usuario del 2026-11-12" (más abajo).
+- **Trabajo anterior (2026-11-01):** CORS estricto, bloqueo con 403 de los orígenes no permitidos y documentación Swagger (D-19, `docs/cors-y-swagger.md`), pedido para la clase de Programación Web 2. Hecho en `main`, commit `6612d73`, ya subido a GitHub (`origin`). En la sesión de trabajo pasaron las 395 del backend, las 24 de la raíz y Ruff, y se comprobó en Chromium que Swagger carga y que una página de otro origen queda bloqueada. La línea base de la tarea 1 confirma que también pasan en el computador del usuario.
+- **Trabajo anterior a ese (2026-11-01):** plantillas según el manual de procesamiento macroscópico y muestreo para histología (D-18, `docs/plantillas-manual.md`), hecho directamente en `main` (sin rama propia, por elección del usuario el 2026-11-01). El usuario ejecutó en su computador `npm run check` y todas las pruebas (23 de la raíz, 377 del backend y 157 del frontend, todas en verde), hizo el commit `aa1e2ba` y lo subió a GitHub. Falta la prueba manual en el navegador y la revisión del patólogo (siguiente paso 0). Nota: las pruebas del backend fallan con Python 3.14, porque Django 4.2 no es compatible con esa versión; el entorno virtual (`venv`) se debe crear con Python 3.12 (`py -3.12 -m venv venv`).
 - **Rama de trabajo anterior:** ninguna abierta. Todo está en `main`, que es la única rama (las ramas viejas, ya unidas, se borraron el 2026-10-14). La fase de Cypress se unió a `main` el 2026-10-14, después de que el usuario probara `npm run e2e:presentacion` en Chrome y grabara los videos de respaldo. Lo siguiente es la presentación del viernes 2026-10-16; después, los grupos 4, 6 y 7 de la fase 4.
 - **Estado:**
   - Están terminados y en `main`:
@@ -30,8 +33,8 @@ Este archivo dice **en qué quedamos**. Se actualiza al terminar cada tarea para
   4. Registrar el cambio en `CHANGELOG.md` y actualizar la documentación.
   5. Antes del commit, si el cambio toca código, ejecutar `npm run check` y todas las pruebas (raíz, backend y frontend). Si algo falla, no se hace el commit hasta corregirlo. Si el commit solo cambia documentación, no hace falta ejecutar las pruebas (regla 7 de `CLAUDE.md`).
   6. Hacer el commit.
-  7. Hacer `git push` de la rama de trabajo después de cada commit, como respaldo. El usuario lo autorizó el 2026-10-03. Unir la rama a `main` requiere preguntar aparte.
-- **Pruebas:** 24 de la raíz desde D-19 (`npm test`, comprobaciones de `npm run dev`, `npm run check` y `npm run e2e`), 395 del backend desde D-19 (377 con D-18) (`cd backend` y luego `python manage.py test`; con SQLite usan el archivo `backend/test_db.sqlite3`) y 157 del frontend desde D-18 (antes 137; `cd frontend` y luego `npm test`). Además, 25 de Cypress (`npm run e2e` en la raíz, cerca de un minuto; no son obligatorias antes de cada commit, D-17). Con D-18 el usuario comprobó que todas pasan (2026-11-01); las de D-19 falta ejecutarlas en su computador.
+  7. Hacer `git push` de la rama de trabajo después de cada commit, como respaldo. El usuario lo autorizó el 2026-10-03 y lo volvió a confirmar el 2026-11-12 (reemplaza el "preguntar antes del push" de `docs/mejoras-objetivos-investigacion.md`). Unir la rama a `main` requiere preguntar aparte. Nunca `git push --force`.
+- **Pruebas:** 24 de la raíz desde D-19 (`npm test`, comprobaciones de `npm run dev`, `npm run check` y `npm run e2e`), 395 del backend desde D-19 (377 con D-18) (`cd backend` y luego `python manage.py test`; con SQLite usan el archivo `backend/test_db.sqlite3`) y 157 del frontend desde D-18 (antes 137; `cd frontend` y luego `npm test`). Además, 25 de Cypress (`npm run e2e` en la raíz, cerca de un minuto; no son obligatorias antes de cada commit, D-17). Con D-18 el usuario comprobó que todas pasan (2026-11-01). Las de D-19 se confirman con la línea base de la tarea 1 (2026-11-12).
 
 ## Hecho
 
@@ -112,11 +115,26 @@ Este archivo dice **en qué quedamos**. Se actualiza al terminar cada tarea para
 | — | Limpieza de ramas: se borran `fase-cypress` y otras 17 ramas viejas, en el computador y en GitHub. Antes se comprobó que ninguna tenía commits fuera de `main`, así que no se pierde nada: los commits citados en esta tabla siguen en `main`. Solo queda `main`. Lo pidió el usuario el 2026-10-14 | commit "docs: ramas viejas borradas" |
 | O-22, O-23, O-21 | Fase 4, grupo 5: filtros de la URL con 400 en vez de 500 (`config/filtros.py`); `datos_ingresados` validado en el modelo (objeto, valores simples, límites) y `{}` se guarda en `/admin/` (migración 0013); `texto_generado` en la misma transacción; `LOGGING` y registro de logins (logger `seguridad`, `LOG_LEVEL`). 19 pruebas nuevas | commit "fix(seguridad): errores y registros (fase 4, grupo 5)" |
 | D-18 | Plantillas según el manual de procesamiento macroscópico (secciones, campos que aplican según el procedimiento, 124 → 260 campos sin borrar ninguno, `actualizar_plantillas`), muestreo para histología con canastillas (modelo `Canastilla`, migración 0014, API, `/admin/`, PDF y `MuestreoHistologia`) y descripción fiel a lo registrado. 55 pruebas nuevas del backend y 20 del frontend | `aa1e2ba` |
-| D-19 | CORS solo con `CORS_ALLOWED_ORIGINS` también en desarrollo, 403 a los orígenes no permitidos (`config/origenes.py`) y documentación Swagger en `/api/docs/` y `/api/schema/` (`drf-spectacular`), para la clase de Programación Web 2. 18 pruebas nuevas del backend y 1 de la raíz | pendiente (falta `pip install` y la regla 7 en el computador del usuario) |
+| D-19 | CORS solo con `CORS_ALLOWED_ORIGINS` también en desarrollo, 403 a los orígenes no permitidos (`config/origenes.py`) y documentación Swagger en `/api/docs/` y `/api/schema/` (`drf-spectacular`), para la clase de Programación Web 2. 18 pruebas nuevas del backend y 1 de la raíz | `6612d73` (subido a `origin`) |
+| — | `docs/progreso.md` puesto al día (D-19 ya tenía commit) y plan de mejoras para los objetivos de investigación (`docs/mejoras-objetivos-investigacion.md`), con las decisiones del usuario del 2026-11-12. Solo documentación | commit "docs: plan de mejoras para los objetivos de investigación" |
 
 ## Siguiente paso
 
-0. **D-19 (2026-11-01):** en `backend/`, con el venv activado, `pip install -r requirements-dev.txt`; luego `npm run check` y todas las pruebas, y el commit. Para la revisión del profesor, seguir la sección 4 de `docs/cors-y-swagger.md`.
+0. **Mejoras para los objetivos de investigación (2026-11-12),** en el orden de `docs/mejoras-objetivos-investigacion.md`. Al terminar cada tarea se para, se entrega el resumen de la sección 4 de ese documento y se espera la aprobación del usuario antes de la siguiente.
+
+   | # | Tarea | Rama | Estado |
+   |---|---|---|---|
+   | — | Línea base: `npm run check` y todas las pruebas sobre `main` | — | pendiente |
+   | 1 | Descripción macroscópica editable | `texto-macroscopico-editable` | decisiones tomadas (abajo); falta empezar |
+   | 2 | Estado de fijación y rotulado | por definir | antes de escribir código, preguntar al usuario tipo, opciones, obligatoriedad y frase |
+   | 3 | Plantilla de placenta | por definir | bloqueada: espera el contenido del manual o la lista del patólogo |
+   | 4 | Revisión de la gástrica endoscópica (solo documento) | por definir | espera los textos de ejemplo del usuario |
+   | 5 | Indicador de completitud | por definir | pendiente |
+   | 6 | Tiempo de diligenciamiento | — | primero una propuesta; no se registra nada sin aprobación (consentimiento) |
+   | 7 | Instancia de prueba (PostgreSQL y documentación) | por definir | pendiente; no se despliega nada |
+   | 8 | Seguridad: grupos 4, 6 y 7 de la fase 4 | una por grupo | grupo 6: borrar `activo` autorizado (abajo); O-19 y O-14 requieren propuesta |
+
+   Para la revisión del profesor de D-19, seguir la sección 4 de `docs/cors-y-swagger.md`.
 1. **D-18 (2026-11-01):** commit `aa1e2ba` hecho y subido a GitHub, con todas las pruebas en verde. Falta probar a mano un informe de Tiroides y uno de Mama (campos que aparecen según el procedimiento, canastillas y PDF). Después, pedir al patólogo que revise la sección 6 de `docs/plantillas-manual.md`. En una base existente, aplicar `python manage.py migrate` y `python manage.py actualizar_plantillas`.
 
 1. **Fase 3 terminada** y unida a `main` el 2026-10-11. El usuario respondió el informe el mismo día (`docs/auditoria-owasp.md`, "Respuestas del usuario").
@@ -225,6 +243,21 @@ Quedan dos:
 - `CHANGELOG.md`, I-9a: el análisis menciona `BrowserRouter`, y la app usa `createBrowserRouter` desde D-13. **Comprobado en la fase 3 (2026-10-11):** sigue sin afectar, porque la app no hidrata datos del servidor (O-11 de `docs/auditoria-owasp.md`; entrada nueva en `CHANGELOG.md`).
 - `CLAUDE.md` dice "No hay linter configurado": cambia en la fase 2.
 
+## Decisiones del usuario del 2026-11-12
+
+Respuestas a las preguntas hechas antes de empezar las mejoras para los objetivos de investigación:
+
+- **Herramienta:** Claude Code en una terminal del computador del usuario.
+- **`git push`:** se hace después de cada commit de la rama de trabajo (ver "Forma de trabajar", punto 7). Unir a `main` sigue requiriendo preguntar.
+- **D-16, campo `activo` (tarea 8, grupo 6):** el usuario **autoriza por escrito** eliminar el campo `activo` con una migración que primero copia su valor en `is_active`, como dice D-16. Es la única excepción autorizada a la regla de migraciones solo aditivas; cualquier otro borrado sigue necesitando autorización aparte.
+- **Tarea 1, cómo detectar que el texto sugerido cambió:** opción A. Además de `descripcion_macroscopica_final`, un segundo campo nuevo (por ejemplo `descripcion_macroscopica_base`, opcional y vacío por defecto) guarda el texto sugerido del que partió la edición del patólogo. Si `texto_generado` ya no coincide con esa base, se muestra el aviso ("usar el nuevo texto sugerido" o "conservar mi versión"), también si se cierra la página y se vuelve otro día. Las dos migraciones son aditivas.
+- **Tarea 1, vista previa en vivo:** el usuario dejó la elección a Claude. Se elige **un endpoint de solo lectura** que calcula el texto sugerido con la misma `generar_descripcion_macroscopica`, a partir de la patología y los datos del formulario, **sin guardar nada ni gastar un número de petición** (D-7). Motivo: un informe nuevo nunca se autoguarda (D-13), así que, si la vista previa dependiera del guardado, no cambiaría hasta el primer guardado. Condiciones: permisos de escritura de informes (admin y patólogo), mismas validaciones que `validar_datos`, límite de peticiones `user`, `@extend_schema` para Swagger (D-19) y, en el frontend, una espera corta después del último cambio antes de pedirla. Se presenta al usuario con su prueba antes de implementarlo, como todo cambio.
+- **Tarea 1, finalizar con el aviso sin resolver:** se puede finalizar con la versión del patólogo, pero **antes se pide una confirmación** que explica que el texto sugerido cambió después de su edición.
+
 ## Pendiente de respuesta del usuario
+
+- **Tarea 2:** tipo, opciones, obligatoriedad y frase de los campos de fijación y rotulado (se preguntan al empezar la tarea).
+- **Tarea 3:** contenido del manual del HUV para placenta o lista confirmada por un patólogo.
+- **Tarea 4:** textos de ejemplo de biopsias gástricas endoscópicas, sin datos de pacientes.
 
 - Las preguntas de la fase 3 se respondieron el 2026-10-11. La de los borradores ajenos queda para el patólogo y el profesor (sección "Pendientes", punto 2).
