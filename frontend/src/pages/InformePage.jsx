@@ -13,6 +13,7 @@ import MuestreoHistologia, {
 } from '../components/informe/MuestreoHistologia';
 import SeccionFirma from '../components/informe/SeccionFirma';
 import SeccionAdendas from '../components/informe/SeccionAdendas';
+import DescripcionMacroscopica, { sugeridoCambio } from '../components/informe/DescripcionMacroscopica';
 import useOpciones from '../hooks/useOpciones';
 import { conOpcionActual, hoyISO } from '../utils/formularios';
 import { agruparPorSeccion, camposAplicables, esVacio } from '../utils/reglas';
@@ -29,6 +30,8 @@ const solicitudVacia = () => ({
 
 // D-13: un borrador existente se autoguarda este tiempo después del último cambio.
 export const ESPERA_AUTOGUARDADO_MS = 5000;
+// Tarea 1: la vista previa del texto sugerido se pide este tiempo después del último cambio.
+export const ESPERA_VISTA_PREVIA_MS = 800;
 
 const formatoHora = new Intl.DateTimeFormat('es-CO', {
   hour: '2-digit',
@@ -74,6 +77,12 @@ export default function InformePage() {
   // Muestreo para histología (D-18): canastillas e indicaciones del manual de la patología.
   const [canastillas, setCanastillas] = useState([]);
   const [guiaMuestreo, setGuiaMuestreo] = useState([]);
+  // Descripción macroscópica (tarea 1): el sugerido por el sistema, la versión del patólogo
+  // y el sugerido del que partió. `cambiosDatos` cuenta los cambios en los campos de la
+  // plantilla: solo ellos piden una vista previa nueva.
+  const [textoSugerido, setTextoSugerido] = useState('');
+  const [macroscopica, setMacroscopica] = useState({ final: '', base: '' });
+  const [cambiosDatos, setCambiosDatos] = useState(0);
   const [informe, setInforme] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -186,6 +195,11 @@ export default function InformePage() {
           setDiagnosticos(conClaves(data.diagnosticos));
           setCanastillas(canastillasConClaves(data.canastillas));
           setComentarios(data.comentarios || '');
+          setTextoSugerido(data.texto_generado || '');
+          setMacroscopica({
+            final: data.descripcion_macroscopica_final || '',
+            base: data.descripcion_macroscopica_base || '',
+          });
           setFormData(data.datos_ingresados || {});
           setSelectedPatologia(data.patologia);
         })
@@ -225,9 +239,39 @@ export default function InformePage() {
 
   const handleFieldChange = (fieldName, value) => {
     marcarCambio();
+    setCambiosDatos((n) => n + 1);
     setFormData((prev) => ({ ...prev, [fieldName]: value }));
     setErrors((prev) => ({ ...prev, [fieldName]: null }));
   };
+
+  // Vista previa del texto sugerido (tarea 1): se pide al backend, que no guarda nada,
+  // un momento después del último cambio en los campos de la plantilla. Si falla, se
+  // conserva la anterior: al guardar, el backend vuelve a generar el texto.
+  useEffect(() => {
+    if (!cambiosDatos || soloLectura || !selectedPatologia) return undefined;
+    let vigente = true;
+    const temporizador = setTimeout(async () => {
+      try {
+        const { data } = await client.post('/informes/vista-previa-macroscopica/', {
+          patologia: selectedPatologia,
+          datos_ingresados: formData,
+        });
+        if (vigente) setTextoSugerido(data.texto_sugerido);
+      } catch {
+        // Sin vista previa nueva; el texto se regenera al guardar.
+      }
+    }, ESPERA_VISTA_PREVIA_MS);
+    return () => {
+      vigente = false;
+      clearTimeout(temporizador);
+    };
+  }, [cambiosDatos, soloLectura, selectedPatologia, formData]);
+
+  const cambiarMacroscopica = (valores) => {
+    marcarCambio();
+    setMacroscopica(valores);
+  };
+  const avisoSugeridoCambio = sugeridoCambio({ sugerido: textoSugerido, ...macroscopica });
 
   const cambiarSolicitud = (campo, valor) => {
     marcarCambio();
@@ -290,6 +334,8 @@ export default function InformePage() {
     patologia: selectedPatologia,
     tipo_muestra: tipoMuestra,
     datos_ingresados: formData,
+    descripcion_macroscopica_final: macroscopica.final,
+    descripcion_macroscopica_base: macroscopica.base,
     descripcion_microscopica: microscopica,
     diagnosticos: sinClaves(diagnosticos),
     canastillas: canastillasSinClaves(canastillas),
@@ -312,6 +358,8 @@ export default function InformePage() {
     if (versionRef.current === versionInicio) {
       setDiagnosticos(conClaves(data.diagnosticos));
       setCanastillas(canastillasConClaves(data.canastillas));
+      // El sugerido que generó el backend con los datos guardados.
+      if (data.texto_generado !== undefined) setTextoSugerido(data.texto_generado);
     }
     setVersionGuardada(versionInicio);
   };
@@ -584,6 +632,12 @@ export default function InformePage() {
                 informe?.estado === 'borrador' &&
                 (confirmFinalizar ? (
                   <>
+                    {avisoSugeridoCambio && (
+                      <p className="aviso-finalizar">
+                        El texto sugerido cambió después de su edición de la descripción macroscópica: se finalizará con
+                        su versión.
+                      </p>
+                    )}
                     <button className="btn btn-success" onClick={handleFinalizar}>
                       Si, Confirmar
                     </button>
@@ -720,7 +774,7 @@ export default function InformePage() {
 
         {/* Contenido en el orden del informe real (informe v2, etapa 5): macroscópica
             (campos dinámicos y texto generado), microscópica, diagnósticos y comentarios */}
-        {(plantillas.length > 0 || informe?.texto_generado) && (
+        {(plantillas.length > 0 || informe?.texto_generado || macroscopica.final) && (
           <div className="card">
             <div className="card-header">
               <h2>Descripción macroscópica</h2>
@@ -732,12 +786,14 @@ export default function InformePage() {
                   <div className="dynamic-fields">{seccion.campos.map(renderField)}</div>
                 </section>
               ))}
-              {informe?.texto_generado && (
-                <>
-                  <h3 className="texto-generado-titulo">Texto generado</h3>
-                  <div className="generated-text">{informe.texto_generado}</div>
-                </>
-              )}
+              {/* Texto sugerido y versión revisada por el patólogo (tarea 1) */}
+              <DescripcionMacroscopica
+                sugerido={textoSugerido}
+                final={macroscopica.final}
+                base={macroscopica.base}
+                onCambiar={cambiarMacroscopica}
+                disabled={soloLectura}
+              />
             </div>
           </div>
         )}

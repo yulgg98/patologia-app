@@ -663,6 +663,36 @@
 					"response": []
 				},
 				{
+					"name": "Vista previa de la descripción macroscópica",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{base_url}}/api/informes/vista-previa-macroscopica/",
+							"host": [
+								"{{base_url}}"
+							],
+							"path": [
+								"api",
+								"informes",
+								"vista-previa-macroscopica",
+								""
+							]
+						},
+						"description": "Devuelve {texto_sugerido} con la misma función que al guardar el informe. No guarda nada ni gasta un número de petición. Solo patólogo o admin. No exige los obligatorios; rechaza con 400 los datos mal formados, los números negativos y los valores fuera de la lista. Datos ficticios.",
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"patologia\": 1,\n  \"datos_ingresados\": {\"localizacion\": \"Dorso de la mano\"}\n}"
+						}
+					},
+					"response": []
+				},
+				{
 					"name": "Ver informe",
 					"request": {
 						"method": "GET",

@@ -589,6 +589,29 @@ textarea {
   margin-bottom: 0.5rem;
 }
 
+/* ── Descripción macroscópica editable (tarea 1) ───────── */
+.descripcion-macroscopica {
+  margin-top: 1.25rem;
+}
+.descripcion-macroscopica .generated-text {
+  margin-bottom: 1rem;
+}
+.descripcion-macroscopica-acciones {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+.alert-lista .descripcion-macroscopica-acciones {
+  margin-top: 0.5rem;
+}
+.aviso-finalizar {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.85rem;
+  color: #92400e;
+}
+
 /* ── Diagnósticos del informe (informe v2, etapa 5) ────── */
 .lista-diagnosticos {
   list-style: none;

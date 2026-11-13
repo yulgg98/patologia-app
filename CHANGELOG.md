@@ -3,6 +3,32 @@
 Todos los cambios de código del proyecto se documentan aquí, del más reciente al más antiguo.
 Cada entrada indica la fecha, qué se cambió y por qué. Los códigos como "C-1" remiten a `docs/auditoria-inicial.md`.
 
+## 2026-11-12
+
+### Descripción macroscópica editable (tarea 1 de las mejoras para los objetivos de investigación)
+
+**Qué se cambió:**
+- **Modelo (migración `informes/0015`, solo agrega):** `Informe.descripcion_macroscopica_final` (texto revisado por el patólogo) y `Informe.descripcion_macroscopica_base` (texto sugerido del que partió la edición). Los dos son opcionales y vacíos por defecto, así que los informes existentes no cambian. Método nuevo `Informe.descripcion_macroscopica_vigente()`: el texto revisado si existe y, si no, `texto_generado`.
+- **`texto_generado` no cambia:** se sigue generando en cada guardado con `generar_descripcion_macroscopica` y es el texto sugerido.
+- **API (`informes/serializers.py`, `informes/views.py`):**
+  - los dos campos nuevos se pueden escribir mientras el informe es borrador; un finalizado sigue respondiendo 400 (D-3);
+  - un texto revisado solo con espacios se guarda vacío, junto con su base;
+  - campo nuevo de solo lectura `descripcion_macroscopica_vigente`;
+  - acción nueva `POST /api/informes/vista-previa-macroscopica/` (`VistaPreviaMacroscopicaSerializer`, `TextoSugeridoSerializer`, `@extend_schema`): devuelve el texto sugerido sin guardar nada ni gastar un número de petición (D-7). Solo la usan patólogos y administradores.
+- **`informes/reglas.py`:** `validar_datos` recibe el parámetro opcional `exigir_obligatorios`, `True` por defecto, así que guardar valida igual que antes. La vista previa lo usa con `False`.
+- **PDF (`informes/utils.py`):** la sección "DESCRIPCIÓN MACROSCÓPICA" imprime `descripcion_macroscopica_vigente()`, escapada con `texto_seguro()` (I-3). Sin texto revisado, imprime lo mismo que antes.
+- **Frontend:**
+  - `components/informe/DescripcionMacroscopica.jsx` (nuevo): texto sugerido, área editable "Descripción macroscópica del informe", "Restaurar texto sugerido", "Copiar descripción" (portapapeles) y el aviso "El texto sugerido cambió después de su edición", con "Usar el nuevo texto sugerido" y "Conservar mi versión";
+  - `InformePage.jsx`: envía los dos campos; pide la vista previa 800 ms después del último cambio en un campo de la plantilla (`ESPERA_VISTA_PREVIA_MS`); en la confirmación de "Finalizar" explica que el texto sugerido cambió si el aviso sigue sin resolver;
+  - `index.css`: estilos de la tarjeta.
+- **Pruebas:**
+  - backend: 19 nuevas (`DescripcionMacroscopicaEditableTests`, `VistaPreviaMacroscopicaTests`); total 414;
+  - frontend: 11 nuevas en `InformePage.test.jsx`; total 168;
+  - con autorización del usuario, `MigracionEncabezadoCongeladoTests` lee `datos_finalizacion` con `.only('datos_finalizacion')`. Migra solo hasta la `0012`, donde todavía no existen las columnas nuevas; lo que comprueba no cambia.
+- **Documentación:** `README.md` (endpoints de informes), `CLAUDE.md`, la colección de Postman ("Vista previa de la descripción macroscópica") y `docs/progreso.md`.
+
+**Por qué:** es el objetivo específico OE2 del proyecto de investigación: el prototipo genera una descripción macroscópica *sugerida para revisión del patólogo*. Antes el texto generado era de solo lectura y el patólogo no podía ajustarlo sin perderlo. La vista previa es un endpoint de solo lectura porque un informe nuevo nunca se autoguarda (D-13). Si dependiera del guardado, el texto sugerido no se vería hasta el primer guardado.
+
 ## 2026-11-01
 
 ### CORS estricto y documentación Swagger de la API (D-19)

@@ -27,8 +27,10 @@ from .serializers import (
     PatologiaSerializer,
     PlantillaSerializer,
     ServicioSerializer,
+    TextoSugeridoSerializer,
+    VistaPreviaMacroscopicaSerializer,
 )
-from .utils import generar_pdf_informe
+from .utils import generar_descripcion_macroscopica, generar_pdf_informe
 
 
 class CategoriaViewSet(viewsets.ModelViewSet):
@@ -279,6 +281,25 @@ class InformeViewSet(viewsets.ModelViewSet):
                 'finalizados': por_estado.get(Informe.Estado.FINALIZADO, 0),
             }
         )
+
+    @extend_schema(
+        summary='Vista previa de la descripción macroscópica',
+        request=VistaPreviaMacroscopicaSerializer,
+        responses=TextoSugeridoSerializer,
+    )
+    @action(detail=False, methods=['post'], url_path='vista-previa-macroscopica')
+    def vista_previa_macroscopica(self, request):
+        """
+        Texto sugerido con los datos del formulario, con la misma función que al guardar
+        (tarea 1). No guarda nada ni gasta un número de petición (D-7): así se ve en vivo
+        también en un informe nuevo, que nunca se autoguarda (D-13). Solo patólogo o admin.
+        """
+        serializer = VistaPreviaMacroscopicaSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        texto = generar_descripcion_macroscopica(
+            serializer.validated_data['patologia'], serializer.validated_data['datos_ingresados']
+        )
+        return Response({'texto_sugerido': texto})
 
     @action(detail=True, methods=['get'], url_path='pdf')
     def exportar_pdf(self, request, pk=None):

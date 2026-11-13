@@ -6,7 +6,17 @@ from rest_framework import serializers
 
 from config.catalogos import NombreCatalogoMixin
 
-from .models import Adenda, Canastilla, Categoria, Diagnostico, Informe, Patologia, Plantilla, Servicio
+from .models import (
+    Adenda,
+    Canastilla,
+    Categoria,
+    Diagnostico,
+    Informe,
+    Patologia,
+    Plantilla,
+    Servicio,
+    validar_datos_ingresados,
+)
 from .reglas import validar_datos
 from .utils import generar_descripcion_macroscopica
 
@@ -221,6 +231,8 @@ class InformeSerializer(serializers.ModelSerializer):
     canastillas = CanastillaSerializer(many=True, required=False)
     # Se agregan con POST /api/informes/{id}/adendas/; aquí solo se leen (D-9).
     adendas = AdendaSerializer(many=True, read_only=True)
+    # La que imprime el PDF: la revisada por el patólogo o, si no hay, la generada (tarea 1).
+    descripcion_macroscopica_vigente = serializers.CharField(read_only=True)
 
     class Meta:
         model = Informe
@@ -246,6 +258,9 @@ class InformeSerializer(serializers.ModelSerializer):
             'tipo_muestra',
             'datos_ingresados',
             'texto_generado',
+            'descripcion_macroscopica_final',
+            'descripcion_macroscopica_base',
+            'descripcion_macroscopica_vigente',
             'canastillas',
             'descripcion_microscopica',
             'diagnosticos',
@@ -318,6 +333,11 @@ class InformeSerializer(serializers.ModelSerializer):
     def validate(self, data):
         self._validar_paciente_y_fecha_ingreso(data)
         self._validar_campos_obligatorios(data)
+        # Un texto revisado solo con espacios no es una edición: el informe vuelve al
+        # texto sugerido y la base se vacía con él (tarea 1).
+        if 'descripcion_macroscopica_final' in data and not data['descripcion_macroscopica_final'].strip():
+            data['descripcion_macroscopica_final'] = ''
+            data['descripcion_macroscopica_base'] = ''
         return data
 
     # El informe y sus diagnósticos se guardan juntos: si algo falla, no queda ninguno a medias.
@@ -402,6 +422,29 @@ class InformeSerializer(serializers.ModelSerializer):
             errores = validar_datos(patologia.plantillas.all(), datos, guardados)
             if errores:
                 raise serializers.ValidationError({'datos_ingresados': ' '.join(errores)})
+
+
+class VistaPreviaMacroscopicaSerializer(serializers.Serializer):
+    """
+    Petición de POST /api/informes/vista-previa-macroscopica/ (tarea 1). Revisa los datos
+    como al guardar (forma de datos_ingresados, O-23; números y opciones de lista), salvo
+    los obligatorios, que no se exigen mientras se llena el formulario.
+    """
+
+    patologia = serializers.PrimaryKeyRelatedField(queryset=Patologia.objects.all())
+    datos_ingresados = serializers.JSONField(validators=[validar_datos_ingresados])
+
+    def validate(self, data):
+        errores = validar_datos(data['patologia'].plantillas.all(), data['datos_ingresados'], exigir_obligatorios=False)
+        if errores:
+            raise serializers.ValidationError({'datos_ingresados': ' '.join(errores)})
+        return data
+
+
+class TextoSugeridoSerializer(serializers.Serializer):
+    """Respuesta de la vista previa (solo para la documentación Swagger, D-19)."""
+
+    texto_sugerido = serializers.CharField()
 
 
 class InformeListSerializer(serializers.ModelSerializer):

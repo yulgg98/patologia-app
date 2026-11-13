@@ -17,10 +17,21 @@ from accounts.models import Usuario
 from pacientes.models import EPS, Paciente
 
 from .definiciones_manual import DEFINICIONES
-from .models import Adenda, Canastilla, Categoria, Diagnostico, Informe, Patologia, Plantilla, Servicio, firma_de
+from .models import (
+    Adenda,
+    Canastilla,
+    Categoria,
+    ConsecutivoPeticion,
+    Diagnostico,
+    Informe,
+    Patologia,
+    Plantilla,
+    Servicio,
+    firma_de,
+)
 from .reglas import campos_aplicables, validar_datos
 from .serializers import MAX_CANASTILLAS
-from .utils import generar_descripcion_macroscopica
+from .utils import generar_descripcion_macroscopica, texto_seguro
 
 
 def paciente_ficticio(numero='PRUEBA0001', **extra):
@@ -1839,20 +1850,28 @@ class MigracionEncabezadoCongeladoTests(TransactionTestCase):
     def tearDown(self):
         self.migrar(MigrationExecutor(connection).loader.graph.leaf_nodes())
 
+    # Se lee solo datos_finalizacion: en la 0012 todavía no existen las columnas que el
+    # modelo actual agregó después (p. ej. las de la 0015, tarea 1). Ajuste autorizado
+    # por el usuario el 2026-11-12; lo que se comprueba no cambia.
     def test_completa_los_finalizados_con_el_encabezado_de_demostracion(self):
         ids, otro = self.crear_informes()
         self.migrar(self.DESPUES)
-        finalizado = Informe.objects.get(id=ids['finalizado'])
+        finalizado = Informe.objects.only('datos_finalizacion').get(id=ids['finalizado'])
         self.assertEqual(finalizado.datos_finalizacion['laboratorio'], self.DEMOSTRACION)
         self.assertEqual(finalizado.datos_finalizacion['firma']['registro_medico'], 'RM-PRUEBA-0009')
-        self.assertIsNone(Informe.objects.get(id=ids['borrador']).datos_finalizacion)
-        self.assertEqual(Informe.objects.get(id=ids['ya_congelado']).datos_finalizacion['laboratorio'], otro)
+        self.assertIsNone(Informe.objects.only('datos_finalizacion').get(id=ids['borrador']).datos_finalizacion)
+        self.assertEqual(
+            Informe.objects.only('datos_finalizacion').get(id=ids['ya_congelado']).datos_finalizacion['laboratorio'],
+            otro,
+        )
 
     def test_la_reversa_quita_el_encabezado_agregado(self):
         ids, otro = self.crear_informes()
         self.migrar(self.DESPUES)
         self.migrar(self.ANTES)
-        self.assertNotIn('laboratorio', Informe.objects.get(id=ids['finalizado']).datos_finalizacion)
+        self.assertNotIn(
+            'laboratorio', Informe.objects.only('datos_finalizacion').get(id=ids['finalizado']).datos_finalizacion
+        )
 
 
 class PdfInformeTests(APITestCase):
@@ -3706,3 +3725,243 @@ class AdminCanastillasTests(TestCase):
         respuesta = self.guardar_ficha(informe, **{'canastillas-0-region': 'Cambiada'})
         self.assertEqual(respuesta.status_code, 302)
         self.assertEqual(informe.canastillas.get().region, 'Cambiada')
+
+
+def textos_del_pdf(cliente, informe_id):
+    """Descarga el PDF y devuelve, en orden, los textos de sus Paragraph."""
+    from reportlab.platypus import Paragraph
+
+    with mock.patch('informes.utils.Paragraph', wraps=Paragraph) as espia:
+        respuesta = cliente.get(f'/api/informes/{informe_id}/pdf/')
+    assert respuesta.status_code == status.HTTP_200_OK, respuesta.status_code
+    return [str(llamada.args[0]) for llamada in espia.call_args_list]
+
+
+def parrafo_macroscopica(textos):
+    """El párrafo que sigue al título DESCRIPCIÓN MACROSCÓPICA (None si no hay sección)."""
+    if 'DESCRIPCIÓN MACROSCÓPICA' not in textos:
+        return None
+    return textos[textos.index('DESCRIPCIÓN MACROSCÓPICA') + 1]
+
+
+class DescripcionMacroscopicaEditableTests(APITestCase):
+    """
+    Tarea 1 de docs/mejoras-objetivos-investigacion.md (OE2): el patólogo revisa y ajusta
+    la descripción macroscópica sugerida sin perder el texto que generó el sistema.
+    `texto_generado` sigue igual que antes; `descripcion_macroscopica_final` guarda el texto
+    revisado y `descripcion_macroscopica_base`, el texto sugerido del que partió la edición
+    (decisión del usuario del 2026-11-12, opción A). Solo datos ficticios.
+    """
+
+    URL = '/api/informes/'
+
+    def setUp(self):
+        self.autor = Usuario.objects.create_user(
+            username='patologo_macro_editable',
+            password='ClaveSegura-2026',
+            rol=Usuario.Rol.PATOLOGO,
+            registro_medico='RM-PRUEBA-0001',
+        )
+        self.client.force_authenticate(self.autor)
+        self.patologia = Patologia.objects.create(nombre='Biopsia Ficticia')
+        Plantilla.objects.create(
+            patologia=self.patologia, campo_nombre='localizacion', campo_label='Localización', orden=1
+        )
+        self.paciente = paciente_ficticio()
+
+    def url(self, informe_id):
+        return f'{self.URL}{informe_id}/'
+
+    def crear(self, **extra):
+        cuerpo = {
+            'patologia': self.patologia.id,
+            'paciente': self.paciente.id,
+            'datos_ingresados': {'localizacion': 'dorso de la mano'},
+            'descripcion_microscopica': 'Proliferación de células basaloides.',
+            'diagnosticos': [{'descripcion': 'Diagnóstico ficticio'}],
+            **extra,
+        }
+        respuesta = self.client.post(self.URL, cuerpo, format='json')
+        self.assertEqual(respuesta.status_code, status.HTTP_201_CREATED, respuesta.data)
+        return respuesta.data
+
+    def sugerido(self, localizacion='dorso de la mano'):
+        return generar_descripcion_macroscopica(self.patologia, {'localizacion': localizacion})
+
+    def test_un_informe_nuevo_no_tiene_texto_revisado(self):
+        datos = self.crear()
+        self.assertEqual(datos['descripcion_macroscopica_final'], '')
+        self.assertEqual(datos['descripcion_macroscopica_base'], '')
+        self.assertEqual(datos['texto_generado'], self.sugerido())
+        self.assertEqual(datos['descripcion_macroscopica_vigente'], self.sugerido())
+
+    def test_se_crea_un_borrador_con_el_texto_revisado(self):
+        datos = self.crear(
+            descripcion_macroscopica_final='Texto revisado por el patólogo.',
+            descripcion_macroscopica_base=self.sugerido(),
+        )
+        informe = Informe.objects.get(pk=datos['id'])
+        self.assertEqual(informe.descripcion_macroscopica_final, 'Texto revisado por el patólogo.')
+        self.assertEqual(informe.descripcion_macroscopica_base, self.sugerido())
+        # El texto sugerido se sigue generando igual que antes.
+        self.assertEqual(informe.texto_generado, self.sugerido())
+        self.assertEqual(datos['descripcion_macroscopica_vigente'], 'Texto revisado por el patólogo.')
+
+    def test_se_edita_el_texto_revisado_de_un_borrador(self):
+        informe_id = self.crear()['id']
+        respuesta = self.client.patch(
+            self.url(informe_id),
+            {'descripcion_macroscopica_final': 'Ajustado.', 'descripcion_macroscopica_base': self.sugerido()},
+            format='json',
+        )
+        self.assertEqual(respuesta.status_code, status.HTTP_200_OK, respuesta.data)
+        self.assertEqual(respuesta.data['descripcion_macroscopica_vigente'], 'Ajustado.')
+        self.assertEqual(respuesta.data['texto_generado'], self.sugerido())
+
+    def test_si_cambian_los_datos_no_se_sobrescribe_el_texto_revisado(self):
+        informe_id = self.crear(
+            descripcion_macroscopica_final='Mi versión.',
+            descripcion_macroscopica_base=self.sugerido(),
+        )['id']
+        respuesta = self.client.patch(
+            self.url(informe_id), {'datos_ingresados': {'localizacion': 'antebrazo'}}, format='json'
+        )
+        self.assertEqual(respuesta.status_code, status.HTTP_200_OK, respuesta.data)
+        # El sugerido cambia, pero la edición y su base se conservan: la diferencia entre
+        # la base y el sugerido es lo que hace aparecer el aviso en la pantalla.
+        self.assertEqual(respuesta.data['texto_generado'], self.sugerido('antebrazo'))
+        self.assertEqual(respuesta.data['descripcion_macroscopica_final'], 'Mi versión.')
+        self.assertEqual(respuesta.data['descripcion_macroscopica_base'], self.sugerido())
+
+    def test_restaurar_el_texto_sugerido_vacia_el_texto_revisado_y_su_base(self):
+        informe_id = self.crear(
+            descripcion_macroscopica_final='Mi versión.',
+            descripcion_macroscopica_base=self.sugerido(),
+        )['id']
+        respuesta = self.client.patch(
+            self.url(informe_id),
+            {'descripcion_macroscopica_final': '', 'descripcion_macroscopica_base': ''},
+            format='json',
+        )
+        self.assertEqual(respuesta.status_code, status.HTTP_200_OK, respuesta.data)
+        self.assertEqual(respuesta.data['descripcion_macroscopica_vigente'], self.sugerido())
+
+    def test_un_texto_revisado_solo_con_espacios_cuenta_como_vacio(self):
+        datos = self.crear(descripcion_macroscopica_final='   \n ', descripcion_macroscopica_base=self.sugerido())
+        self.assertEqual(datos['descripcion_macroscopica_final'], '')
+        self.assertEqual(datos['descripcion_macroscopica_base'], '')
+        self.assertEqual(datos['descripcion_macroscopica_vigente'], self.sugerido())
+
+    def test_no_se_edita_el_texto_revisado_de_un_finalizado(self):
+        informe_id = self.crear(descripcion_macroscopica_final='Versión firmada.')['id']
+        self.assertEqual(self.client.post(f'{self.url(informe_id)}finalizar/').status_code, status.HTTP_200_OK)
+        respuesta = self.client.patch(
+            self.url(informe_id), {'descripcion_macroscopica_final': 'Cambio tardío.'}, format='json'
+        )
+        self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertEqual(Informe.objects.get(pk=informe_id).descripcion_macroscopica_final, 'Versión firmada.')
+
+    def test_el_pdf_usa_el_texto_revisado_escapado(self):
+        informe_id = self.crear(descripcion_macroscopica_final='Revisado <b>a mano</b> & listo.\nSegunda línea.')['id']
+        textos = textos_del_pdf(self.client, informe_id)
+        self.assertEqual(
+            parrafo_macroscopica(textos),
+            'Revisado &lt;b&gt;a mano&lt;/b&gt; &amp; listo.<br/>Segunda línea.',
+        )
+        self.assertNotIn(texto_seguro(self.sugerido()), textos)
+
+    def test_un_informe_antiguo_sin_texto_revisado_imprime_el_texto_generado_como_antes(self):
+        # Creado por el ORM, como los informes de antes de esta tarea: sin los campos nuevos.
+        antiguo = Informe.objects.create(
+            patologia=self.patologia,
+            autor=self.autor,
+            paciente=self.paciente,
+            texto_generado='Texto generado <i>antiguo</i>.',
+        )
+        self.assertEqual(antiguo.descripcion_macroscopica_final, '')
+        self.assertEqual(antiguo.descripcion_macroscopica_vigente(), 'Texto generado <i>antiguo</i>.')
+        textos = textos_del_pdf(self.client, antiguo.id)
+        self.assertEqual(parrafo_macroscopica(textos), 'Texto generado &lt;i&gt;antiguo&lt;/i&gt;.')
+
+    def test_sin_texto_generado_ni_revisado_no_hay_seccion_macroscopica(self):
+        antiguo = Informe.objects.create(patologia=self.patologia, autor=self.autor, paciente=self.paciente)
+        self.assertIsNone(parrafo_macroscopica(textos_del_pdf(self.client, antiguo.id)))
+
+
+class VistaPreviaMacroscopicaTests(APITestCase):
+    """
+    POST /api/informes/vista-previa-macroscopica/ (tarea 1, decisión del usuario del
+    2026-11-12): calcula el texto sugerido con la misma generar_descripcion_macroscopica a
+    partir de la patología y los datos del formulario, sin guardar nada ni gastar un
+    número de petición (D-7). Solo datos ficticios.
+    """
+
+    URL = '/api/informes/vista-previa-macroscopica/'
+
+    def setUp(self):
+        self.patologo = Usuario.objects.create_user(
+            username='patologo_vista_previa', password='ClaveSegura-2026', rol=Usuario.Rol.PATOLOGO
+        )
+        self.patologia = Patologia.objects.create(nombre='Biopsia Vista Previa')
+        Plantilla.objects.create(
+            patologia=self.patologia, campo_nombre='localizacion', campo_label='Localización', orden=1
+        )
+        Plantilla.objects.create(
+            patologia=self.patologia, campo_nombre='peso', campo_label='Peso', tipo_campo='numero', orden=2
+        )
+        self.client.force_authenticate(self.patologo)
+
+    def pedir(self, datos, patologia=None):
+        return self.client.post(
+            self.URL,
+            {'patologia': patologia or self.patologia.id, 'datos_ingresados': datos},
+            format='json',
+        )
+
+    def test_devuelve_el_mismo_texto_que_se_genera_al_guardar(self):
+        datos = {'localizacion': 'dorso de la mano', 'peso': 3}
+        respuesta = self.pedir(datos)
+        self.assertEqual(respuesta.status_code, status.HTTP_200_OK, respuesta.data)
+        self.assertEqual(respuesta.data, {'texto_sugerido': generar_descripcion_macroscopica(self.patologia, datos)})
+
+    def test_no_guarda_nada_ni_gasta_un_numero_de_peticion(self):
+        self.pedir({'localizacion': 'antebrazo'})
+        self.assertFalse(Informe.objects.exists())
+        self.assertFalse(ConsecutivoPeticion.objects.exists())
+
+    def test_acepta_un_formulario_a_medias(self):
+        # Mientras se llena el formulario faltan obligatorios: la vista previa no los exige.
+        Plantilla.objects.create(
+            patologia=self.patologia, campo_nombre='bordes', campo_label='Bordes', obligatorio=True, orden=3
+        )
+        respuesta = self.pedir({'localizacion': 'antebrazo'})
+        self.assertEqual(respuesta.status_code, status.HTTP_200_OK, respuesta.data)
+
+    def test_rechaza_datos_que_no_son_un_objeto(self):
+        respuesta = self.pedir([1, 2])
+        self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('datos_ingresados', respuesta.data)
+
+    def test_rechaza_un_numero_no_valido_como_al_guardar(self):
+        respuesta = self.pedir({'peso': -2})
+        self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('no puede ser negativo', str(respuesta.data['datos_ingresados']))
+
+    def test_rechaza_una_patologia_que_no_existe(self):
+        respuesta = self.pedir({}, patologia=999999)
+        self.assertEqual(respuesta.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn('patologia', respuesta.data)
+
+    def test_el_auditor_no_la_usa(self):
+        auditor = Usuario.objects.create_user(
+            username='auditor_vista_previa', password='ClaveSegura-2026', rol=Usuario.Rol.AUDITOR
+        )
+        self.client.force_authenticate(auditor)
+        self.assertEqual(self.pedir({}).status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_sin_sesion_responde_401(self):
+        self.client.force_authenticate(None)
+        self.assertEqual(self.pedir({}).status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_solo_acepta_post(self):
+        self.assertEqual(self.client.get(self.URL).status_code, status.HTTP_405_METHOD_NOT_ALLOWED)

@@ -522,8 +522,10 @@ def generar_pdf_informe(informe) -> io.BytesIO:
     if adendas:
         elementos += _aviso_adendas(len(adendas), estilos)
 
-    if informe.texto_generado:
-        elementos += _seccion('DESCRIPCIÓN MACROSCÓPICA', [texto_seguro(informe.texto_generado)], estilos)
+    # El texto revisado por el patólogo si existe; si no, el generado, como antes (tarea 1).
+    macroscopica = informe.descripcion_macroscopica_vigente()
+    if macroscopica:
+        elementos += _seccion('DESCRIPCIÓN MACROSCÓPICA', [texto_seguro(macroscopica)], estilos)
 
     canastillas = list(informe.canastillas.all())
     if canastillas:

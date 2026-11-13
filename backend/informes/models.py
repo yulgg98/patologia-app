@@ -307,6 +307,22 @@ class Informe(models.Model):
         verbose_name='Texto generado',
         help_text='Descripción macroscópica generada automáticamente.',
     )
+    # Tarea 1 (OE2): el patólogo revisa el texto sugerido sin perderlo. Vacío: el informe
+    # usa texto_generado, como antes. Solo cambia mientras el informe es borrador (D-3).
+    descripcion_macroscopica_final = models.TextField(
+        blank=True,
+        default='',
+        verbose_name='Descripción macroscópica revisada',
+        help_text='Texto revisado por el patólogo; si está vacío, se usa el texto generado.',
+    )
+    # El texto sugerido del que partió la edición: si texto_generado ya no coincide, la
+    # pantalla avisa que el sugerido cambió (decisión del usuario del 2026-11-12, opción A).
+    descripcion_macroscopica_base = models.TextField(
+        blank=True,
+        default='',
+        verbose_name='Texto sugerido de partida',
+        help_text='Texto sugerido que había cuando el patólogo editó la descripción.',
+    )
     estado = models.CharField(
         max_length=20,
         choices=Estado.choices,
@@ -349,6 +365,12 @@ class Informe(models.Model):
     @property
     def esta_finalizado(self):
         return self.estado == self.Estado.FINALIZADO
+
+    def descripcion_macroscopica_vigente(self):
+        """La que imprime el informe: la revisada por el patólogo o, si no hay, la generada (tarea 1)."""
+        if self.descripcion_macroscopica_final.strip():
+            return self.descripcion_macroscopica_final
+        return self.texto_generado
 
     def requisitos_faltantes(self):
         """Lo que le falta al informe para poder finalizarse (decisión D-8). Vacío si nada."""

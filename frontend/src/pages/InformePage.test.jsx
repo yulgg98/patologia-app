@@ -999,3 +999,186 @@ describe('InformePage: plantillas según el manual y canastillas (D-18)', () => 
     expect(screen.getByLabelText(/Ganglios/)).toHaveValue(0); // un 0 guardado se ve
   });
 });
+
+// Tarea 1 de docs/mejoras-objetivos-investigacion.md (OE2): el patólogo revisa y ajusta la
+// descripción macroscópica sugerida sin perder el texto que generó el sistema.
+describe('InformePage: descripción macroscópica editable', () => {
+  const PLANTILLAS = [
+    {
+      campo_nombre: 'localizacion',
+      campo_label: 'Localización',
+      tipo_campo: 'texto',
+      obligatorio: false,
+      opciones: [],
+      seccion: '',
+      condicion: {},
+      ayuda: '',
+    },
+  ];
+  const BORRADOR = {
+    ...INFORME,
+    datos_ingresados: { localizacion: 'dorso de la mano' },
+    texto_generado: 'Sugerido 1.',
+    descripcion_macroscopica_final: '',
+    descripcion_macroscopica_base: '',
+  };
+  const EDITADO = {
+    ...BORRADOR,
+    descripcion_macroscopica_final: 'Mi versión.',
+    descripcion_macroscopica_base: 'Sugerido 1.',
+  };
+  const URL_VISTA_PREVIA = '/informes/vista-previa-macroscopica/';
+
+  function simular(informe) {
+    simularApi();
+    const original = client.get.getMockImplementation();
+    client.get.mockImplementation((url, ...resto) => {
+      if (url === '/patologias/1/') return Promise.resolve({ data: { plantillas: PLANTILLAS } });
+      if (url === '/informes/5/') return Promise.resolve({ data: informe });
+      return original(url, ...resto);
+    });
+    client.post.mockImplementation((url) => {
+      if (url === URL_VISTA_PREVIA) return Promise.resolve({ data: { texto_sugerido: 'Sugerido 2.' } });
+      if (url === '/informes/5/finalizar/') return Promise.resolve({ data: { ...informe, estado: 'finalizado' } });
+      return Promise.reject(new Error(`POST no simulado: ${url}`));
+    });
+    client.put.mockImplementation((url, datos) => Promise.resolve({ data: { ...informe, ...datos } }));
+  }
+
+  const areaTexto = () => screen.findByLabelText('Descripción macroscópica del informe');
+  const llamadasVistaPrevia = () => client.post.mock.calls.filter(([url]) => url === URL_VISTA_PREVIA);
+
+  async function cambiarLocalizacion(valor) {
+    fireEvent.change(await screen.findByLabelText('Localización'), { target: { value: valor } });
+    await vi.advanceTimersByTimeAsync(1000); // la espera corta antes de pedir la vista previa
+  }
+
+  async function guardar() {
+    fireEvent.click(screen.getByRole('button', { name: /Actualizar Informe/i }));
+    await vi.waitFor(() => expect(client.put).toHaveBeenCalled());
+    return client.put.mock.calls.at(-1)[1];
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    reiniciarOpciones();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('muestra el texto sugerido y el área editable empieza con él', async () => {
+    simular(BORRADOR);
+    renderInforme();
+    expect(await areaTexto()).toHaveValue('Sugerido 1.');
+    expect(screen.getByRole('heading', { name: 'Texto sugerido' })).toBeInTheDocument();
+    expect(screen.queryByText(/El texto sugerido cambió/)).toBeNull();
+  });
+
+  it('al editar el texto, guarda el texto revisado y el sugerido del que partió', async () => {
+    simular(BORRADOR);
+    renderInforme();
+    fireEvent.change(await areaTexto(), { target: { value: 'Mi versión.' } });
+    const datos = await guardar();
+    expect(datos.descripcion_macroscopica_final).toBe('Mi versión.');
+    expect(datos.descripcion_macroscopica_base).toBe('Sugerido 1.');
+  });
+
+  it('"Restaurar texto sugerido" vuelve al sugerido y envía el texto revisado vacío', async () => {
+    simular(EDITADO);
+    renderInforme();
+    expect(await areaTexto()).toHaveValue('Mi versión.');
+    fireEvent.click(screen.getByRole('button', { name: 'Restaurar texto sugerido' }));
+    expect(await areaTexto()).toHaveValue('Sugerido 1.');
+    const datos = await guardar();
+    expect(datos.descripcion_macroscopica_final).toBe('');
+    expect(datos.descripcion_macroscopica_base).toBe('');
+  });
+
+  it('"Copiar descripción" copia el texto vigente al portapapeles', async () => {
+    const writeText = vi.fn().mockResolvedValue();
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+    simular(EDITADO);
+    renderInforme();
+    await areaTexto();
+    fireEvent.click(screen.getByRole('button', { name: 'Copiar descripción' }));
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledWith('Mi versión.'));
+    expect(await screen.findByText('Descripción copiada.')).toBeInTheDocument();
+  });
+
+  it('pide la vista previa después de una espera corta y no guarda nada', async () => {
+    simular(BORRADOR);
+    renderInforme();
+    fireEvent.change(await screen.findByLabelText('Localización'), { target: { value: 'antebrazo' } });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(llamadasVistaPrevia()).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(700);
+    expect(llamadasVistaPrevia()).toEqual([
+      [URL_VISTA_PREVIA, { patologia: 1, datos_ingresados: { localizacion: 'antebrazo' } }],
+    ]);
+    // Sin edición del patólogo, el área sigue al nuevo sugerido.
+    await vi.waitFor(async () => expect(await areaTexto()).toHaveValue('Sugerido 2.'));
+    expect(client.put).not.toHaveBeenCalled();
+  });
+
+  it('si cambian los datos después de editar, avisa y no sobrescribe la edición; "Usar el nuevo texto sugerido"', async () => {
+    simular(EDITADO);
+    renderInforme();
+    await cambiarLocalizacion('antebrazo');
+    expect(await screen.findByText(/El texto sugerido cambió después de su edición/)).toBeInTheDocument();
+    expect(await areaTexto()).toHaveValue('Mi versión.');
+    fireEvent.click(screen.getByRole('button', { name: 'Usar el nuevo texto sugerido' }));
+    expect(await areaTexto()).toHaveValue('Sugerido 2.');
+    expect(screen.queryByText(/El texto sugerido cambió/)).toBeNull();
+    const datos = await guardar();
+    expect(datos.descripcion_macroscopica_final).toBe('');
+    expect(datos.descripcion_macroscopica_base).toBe('');
+  });
+
+  it('"Conservar mi versión" quita el aviso y guarda la versión con el nuevo sugerido como base', async () => {
+    simular(EDITADO);
+    renderInforme();
+    await cambiarLocalizacion('antebrazo');
+    fireEvent.click(await screen.findByRole('button', { name: 'Conservar mi versión' }));
+    expect(screen.queryByText(/El texto sugerido cambió/)).toBeNull();
+    expect(await areaTexto()).toHaveValue('Mi versión.');
+    const datos = await guardar();
+    expect(datos.descripcion_macroscopica_final).toBe('Mi versión.');
+    expect(datos.descripcion_macroscopica_base).toBe('Sugerido 2.');
+  });
+
+  it('al abrir un informe cuyo sugerido cambió después de la edición, muestra el aviso', async () => {
+    simular({ ...EDITADO, descripcion_macroscopica_base: 'Sugerido viejo.' });
+    renderInforme();
+    expect(await screen.findByText(/El texto sugerido cambió después de su edición/)).toBeInTheDocument();
+  });
+
+  it('finalizar con el aviso sin resolver pide confirmar explicando que el sugerido cambió', async () => {
+    simular({ ...EDITADO, descripcion_macroscopica_base: 'Sugerido viejo.' });
+    renderInforme();
+    fireEvent.click(await screen.findByRole('button', { name: 'Finalizar Informe' }));
+    expect(screen.getByText(/se finalizará con su versión/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Confirmar/ }));
+    await vi.waitFor(() => expect(client.post.mock.calls.some(([url]) => url === '/informes/5/finalizar/')).toBe(true));
+  });
+
+  it('sin aviso, la confirmación de finalizar no habla del texto sugerido', async () => {
+    simular(EDITADO);
+    renderInforme();
+    fireEvent.click(await screen.findByRole('button', { name: 'Finalizar Informe' }));
+    expect(screen.queryByText(/se finalizará con su versión/i)).toBeNull();
+  });
+
+  it('un finalizado muestra el texto revisado sin poder editarlo ni pedir vistas previas', async () => {
+    simular({ ...EDITADO, estado: 'finalizado', descripcion_macroscopica_final: 'Versión firmada.' });
+    renderInforme();
+    expect(await areaTexto()).toHaveValue('Versión firmada.');
+    expect(await areaTexto()).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Restaurar texto sugerido' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Copiar descripción' })).toBeInTheDocument();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(llamadasVistaPrevia()).toHaveLength(0);
+  });
+});

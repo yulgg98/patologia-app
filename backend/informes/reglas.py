@@ -67,14 +67,16 @@ def _etiqueta(plantilla):
     return plantilla.campo_label or plantilla.campo_nombre
 
 
-def validar_datos(plantillas, datos, guardados=None):
+def validar_datos(plantillas, datos, guardados=None, exigir_obligatorios=True):
     """
     Errores de los datos del formulario frente a su plantilla, como lista de textos
     (vacía si no hay): obligatorios que aplican y están vacíos, números no válidos o
     negativos y valores de lista que no están entre las opciones. Los campos que no
     aplican no se revisan. `guardados` son los datos que ya tenía el informe: un valor
     de lista que ya estaba guardado se conserva aunque la opción se haya quitado después
-    de la plantilla, como una EPS desactivada (D-4).
+    de la plantilla, como una EPS desactivada (D-4). Con `exigir_obligatorios=False`
+    (la vista previa de la descripción, tarea 1) no se exigen los obligatorios, porque
+    el formulario todavía se está llenando; el resto se revisa igual.
     """
     guardados = guardados or {}
     plantillas = list(plantillas)
@@ -85,7 +87,7 @@ def validar_datos(plantillas, datos, guardados=None):
             continue
         valor = datos.get(plantilla.campo_nombre)
         if es_vacio(valor):
-            if plantilla.obligatorio:
+            if plantilla.obligatorio and exigir_obligatorios:
                 faltantes.append(_etiqueta(plantilla))
         elif plantilla.tipo_campo == 'numero':
             try:
