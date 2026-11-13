@@ -34,7 +34,7 @@ Este archivo dice **en qué quedamos**. Se actualiza al terminar cada tarea para
   5. Antes del commit, si el cambio toca código, ejecutar `npm run check` y todas las pruebas (raíz, backend y frontend). Si algo falla, no se hace el commit hasta corregirlo. Si el commit solo cambia documentación, no hace falta ejecutar las pruebas (regla 7 de `CLAUDE.md`).
   6. Hacer el commit.
   7. Hacer `git push` de la rama de trabajo después de cada commit, como respaldo. El usuario lo autorizó el 2026-10-03 y lo volvió a confirmar el 2026-11-12 (reemplaza el "preguntar antes del push" de `docs/mejoras-objetivos-investigacion.md`). Unir la rama a `main` requiere preguntar aparte. Nunca `git push --force`.
-- **Pruebas:** desde la tarea 1 (2026-11-12), 414 del backend y 168 del frontend. Antes: 24 de la raíz desde D-19 (`npm test`, comprobaciones de `npm run dev`, `npm run check` y `npm run e2e`), 395 del backend desde D-19 (377 con D-18) (`cd backend` y luego `python manage.py test`; con SQLite usan el archivo `backend/test_db.sqlite3`) y 157 del frontend desde D-18 (antes 137; `cd frontend` y luego `npm test`). Además, 25 de Cypress (`npm run e2e` en la raíz, cerca de un minuto; no son obligatorias antes de cada commit, D-17). Con D-18 el usuario comprobó que todas pasan (2026-11-01). Las de D-19 se confirman con la línea base de la tarea 1 (2026-11-12).
+- **Pruebas:** desde la tarea 1 (2026-11-12), 414 del backend y 168 del frontend (175 en la rama `barra-acciones-informe`). Antes: 24 de la raíz desde D-19 (`npm test`, comprobaciones de `npm run dev`, `npm run check` y `npm run e2e`), 395 del backend desde D-19 (377 con D-18) (`cd backend` y luego `python manage.py test`; con SQLite usan el archivo `backend/test_db.sqlite3`) y 157 del frontend desde D-18 (antes 137; `cd frontend` y luego `npm test`). Además, 25 de Cypress (`npm run e2e` en la raíz, cerca de un minuto; no son obligatorias antes de cada commit, D-17). Con D-18 el usuario comprobó que todas pasan (2026-11-01). Las de D-19 se confirman con la línea base de la tarea 1 (2026-11-12).
 
 ## Hecho
 
@@ -118,6 +118,7 @@ Este archivo dice **en qué quedamos**. Se actualiza al terminar cada tarea para
 | D-19 | CORS solo con `CORS_ALLOWED_ORIGINS` también en desarrollo, 403 a los orígenes no permitidos (`config/origenes.py`) y documentación Swagger en `/api/docs/` y `/api/schema/` (`drf-spectacular`), para la clase de Programación Web 2. 18 pruebas nuevas del backend y 1 de la raíz | `6612d73` (subido a `origin`) |
 | — | `docs/progreso.md` puesto al día (D-19 ya tenía commit) y plan de mejoras para los objetivos de investigación (`docs/mejoras-objetivos-investigacion.md`), con las decisiones del usuario del 2026-11-12. Solo documentación | `348ce48` |
 | Tarea 1 (OE2) | Descripción macroscópica editable. Campos `descripcion_macroscopica_final` y `descripcion_macroscopica_base` (migración aditiva 0015); el PDF y la API usan el texto vigente; `POST /api/informes/vista-previa-macroscopica/`, que no guarda nada; tarjeta con texto sugerido, área editable, Restaurar, Copiar y aviso si el sugerido cambia. 19 pruebas nuevas del backend y 11 del frontend; `MigracionEncabezadoCongeladoTests` ajustada con autorización. Aprobada por el usuario y unida a `main` | `d3fdcfd` |
+| Pedido del usuario | Barra de acciones fija al pie en la pantalla del informe: botones (Cancelar, PDF, Guardar/Actualizar, Finalizar) y mensajes de resultado siempre visibles. 7 pruebas nuevas del frontend. Rama `barra-acciones-informe` | commit "feat: barra de acciones fija al pie del informe" |
 
 ## Siguiente paso
 
@@ -256,6 +257,9 @@ Respuestas a las preguntas hechas antes de empezar las mejoras para los objetivo
 - **Tarea 1, finalizar con el aviso sin resolver:** se puede finalizar con la versión del patólogo, pero **antes se pide una confirmación** que explica que el texto sugerido cambió después de su edición.
 
 ## Pendiente de respuesta del usuario
+
+- **Barra de acciones del informe (pedido del 2026-11-12):** el usuario eligió la barra fija al pie. Está hecha en la rama `barra-acciones-informe`, con todas las pruebas en verde (check OK; 24 raíz, 414 backend, 175 frontend). El usuario la probó en el navegador el 2026-11-12 y todo funcionó bien. Falta que apruebe unirla a `main`.
+- **Base de desarrollo (2026-11-12):** al usuario le fallaban el guardado y el PDF porque faltaba aplicar la migración `0015` en `backend/db.sqlite3`. Ya se aplicó (`migrate`, aditiva). Después de cada cambio con migraciones: detener `npm run dev`, ejecutar `python manage.py migrate` y arrancarlo de nuevo.
 
 - **Tarea 2:** tipo, opciones, obligatoriedad y frase de los campos de fijación y rotulado (se preguntan al empezar la tarea).
 - **Tarea 3:** contenido del manual del HUV para placenta o lista confirmada por un patólogo.

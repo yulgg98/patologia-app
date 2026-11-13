@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { RouterProvider, createMemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import client from '../api/client';
@@ -1180,5 +1180,85 @@ describe('InformePage: descripción macroscópica editable', () => {
     expect(screen.getByRole('button', { name: 'Copiar descripción' })).toBeInTheDocument();
     await vi.advanceTimersByTimeAsync(2000);
     expect(llamadasVistaPrevia()).toHaveLength(0);
+  });
+});
+
+// Pedido del usuario del 2026-11-12: los botones para guardar, ver el PDF y finalizar, y los
+// mensajes de resultado, estaban arriba; quien trabajaba abajo no veía qué pasaba. Ahora van
+// en una barra fija al pie de la pantalla, siempre visible.
+describe('InformePage: barra de acciones al pie', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    reiniciarOpciones();
+    simularApi();
+  });
+
+  const barra = () => screen.findByRole('region', { name: 'Acciones del informe' });
+
+  it('un borrador tiene en la barra Cancelar, Vista previa, Actualizar y Finalizar', async () => {
+    renderInforme();
+    const acciones = within(await barra());
+    expect(acciones.getByRole('button', { name: 'Cancelar' })).toBeInTheDocument();
+    expect(acciones.getByRole('button', { name: /Vista previa \(borrador\)/ })).toBeInTheDocument();
+    expect(acciones.getByRole('button', { name: /Actualizar Informe/ })).toBeInTheDocument();
+    expect(acciones.getByRole('button', { name: 'Finalizar Informe' })).toBeInTheDocument();
+  });
+
+  it('la barra es lo último de la pantalla, después de la firma', async () => {
+    renderInforme();
+    const acciones = await barra();
+    const firma = screen.getByRole('heading', { name: 'Firma' });
+    expect(firma.compareDocumentPosition(acciones) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('"Actualizar Informe" de la barra guarda el formulario', async () => {
+    client.put.mockImplementation((url, datos) => Promise.resolve({ data: { ...INFORME, ...datos } }));
+    renderInforme();
+    const acciones = within(await barra());
+    fireEvent.change(await screen.findByLabelText('Comentarios'), { target: { value: 'Cambio desde abajo' } });
+    fireEvent.click(acciones.getByRole('button', { name: /Actualizar Informe/ }));
+    await vi.waitFor(() => expect(client.put).toHaveBeenCalled());
+    expect(client.put.mock.calls[0][1].comentarios).toBe('Cambio desde abajo');
+    expect(await acciones.findByText('Informe actualizado correctamente.')).toBeInTheDocument();
+  });
+
+  it('el aviso de cambios sin guardar se ve en la barra', async () => {
+    renderInforme();
+    const acciones = within(await barra());
+    fireEvent.change(await screen.findByLabelText('Comentarios'), { target: { value: 'Algo nuevo' } });
+    expect(acciones.getByText('Cambios sin guardar')).toBeInTheDocument();
+  });
+
+  it('la confirmación de finalizar y los requisitos que faltan se ven en la barra', async () => {
+    client.post.mockRejectedValue({
+      response: { data: { detail: 'No se puede finalizar.', requisitos: ['El informe no tiene paciente.'] } },
+    });
+    renderInforme();
+    const acciones = within(await barra());
+    fireEvent.click(acciones.getByRole('button', { name: 'Finalizar Informe' }));
+    fireEvent.click(acciones.getByRole('button', { name: /Confirmar/ }));
+    expect(await acciones.findByText('El informe no tiene paciente.')).toBeInTheDocument();
+  });
+
+  it('un finalizado solo ofrece el PDF en la barra', async () => {
+    const original = client.get.getMockImplementation();
+    client.get.mockImplementation((url, ...resto) =>
+      url === '/informes/5/'
+        ? Promise.resolve({ data: { ...INFORME, estado: 'finalizado' } })
+        : original(url, ...resto),
+    );
+    renderInforme();
+    const acciones = within(await barra());
+    expect(acciones.getByRole('button', { name: /Exportar PDF/ })).toBeInTheDocument();
+    expect(acciones.queryByRole('button', { name: /Actualizar Informe/ })).toBeNull();
+    expect(acciones.queryByRole('button', { name: 'Finalizar Informe' })).toBeNull();
+  });
+
+  it('un informe nuevo tiene en la barra Cancelar y Guardar, sin PDF ni Finalizar', async () => {
+    render(<RouterProvider router={crearRouter('/informes/nuevo')} />);
+    const acciones = within(await barra());
+    expect(acciones.getByRole('button', { name: /Guardar Informe/ })).toBeInTheDocument();
+    expect(acciones.queryByRole('button', { name: /Vista previa|Exportar PDF/ })).toBeNull();
+    expect(acciones.queryByRole('button', { name: 'Finalizar Informe' })).toBeNull();
   });
 });

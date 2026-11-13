@@ -190,6 +190,10 @@ En el frontend, `AuthContext` expone `isAdmin`, `isPatologo`, `isAuditor` y `can
 - En el frontend, `components/informe/SeccionAdendas.jsx` es la tarjeta "Adendas", solo en informes finalizados. `InformePage` la dibuja **fuera** de su `<form>`, porque tiene su propio formulario y su propia petición. Pide confirmación antes de guardar y, al guardar, `onAgregada` agrega la adenda a `informe.adendas` sin recargar. Reutiliza `LineasFirma` y `formatoFechaHora` de `SeccionFirma.jsx`.
 
 **Cambios sin guardar en el informe (decisión D-13).**
+- **Barra de acciones (pedido del usuario, 2026-11-12):**
+  - Los botones del informe (Cancelar, PDF, Guardar/Actualizar, Finalizar y su confirmación), los mensajes de resultado (éxito, errores generales, `requisitos`) y `IndicadorGuardado` están en la `<section aria-label="Acciones del informe">` fija al pie (`.barra-acciones`, `position: sticky`), al final de `InformePage`, fuera del `<form>`.
+  - El botón de guardar envía el formulario con `form="formulario-informe"`.
+  - No vuelvas a poner esos botones arriba ni los dupliques: las pruebas los buscan por nombre y fallarían con dos iguales.
 - `InformePage` cuenta los cambios del usuario (`version`; cada `onChange` llama a `marcarCambio()`) y compara con `versionGuardada`. Si se agrega un campo editable al informe, su `onChange` debe llamar a `marcarCambio()`.
 - Con cambios sin guardar, `useBlocker` muestra el aviso (Seguir editando, Salir sin guardar, Guardar y salir) y `beforeunload` cubre cerrar o recargar. "Guardar y salir" no sale si falla la validación. No se frena la salida a `/login` (solo ocurre si la sesión ya terminó).
 - **Cerrar sesión pasa por `/salir`:** "Salir" del `Navbar` solo navega a `/salir` (`CerrarSesionPage`), que llama a `logout()` y lleva a `/login`. No llames a `logout()` directamente desde un botón: el aviso del informe no aparecería.

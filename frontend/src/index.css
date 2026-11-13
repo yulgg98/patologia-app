@@ -589,6 +589,43 @@ textarea {
   margin-bottom: 0.5rem;
 }
 
+/* ── Barra de acciones del informe, fija al pie ────────── */
+/* Pedido del usuario (2026-11-12): botones y mensajes siempre a la vista. */
+.barra-acciones {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  margin-top: 1.5rem;
+  padding: 0.75rem 1rem calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  background: #fff;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.08);
+}
+/* Una lista larga de requisitos no tapa toda la pantalla. */
+.barra-acciones .alert {
+  margin-bottom: 0.5rem;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+.barra-acciones .aviso-finalizar {
+  margin-bottom: 0.5rem;
+}
+.barra-acciones-fila {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+.barra-acciones-botones {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
 /* ── Descripción macroscópica editable (tarea 1) ───────── */
 .descripcion-macroscopica {
   margin-top: 1.25rem;

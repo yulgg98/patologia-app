@@ -5,6 +5,20 @@ Cada entrada indica la fecha, qué se cambió y por qué. Los códigos como "C-1
 
 ## 2026-11-12
 
+### Barra de acciones fija al pie de la pantalla del informe
+
+**Qué se cambió:**
+- **`frontend/src/pages/InformePage.jsx`:** los botones del informe y los mensajes de resultado pasan a una barra fija al pie (`<section aria-label="Acciones del informe">`, clase `barra-acciones`), que se ve siempre mientras uno se desplaza.
+  - **Botones que van a la barra:** "Cancelar", "Vista previa (borrador)" o "Exportar PDF", "Guardar Informe" o "Actualizar Informe", y "Finalizar Informe" con su confirmación.
+  - **Mensajes que van a la barra:** el de éxito, los errores generales, los campos que rechazó el backend, los requisitos que faltan para finalizar, el aviso de la tarea 1 al finalizar y el indicador "Cambios sin guardar".
+  - **Antes:** la mayoría estaban arriba y "Guardar" o "Actualizar" estaba al final del formulario.
+  - **Cómo se mueven:** los botones se mueven, no se duplican; los de la cabecera y el bloque `form-actions` del formulario se trasladaron a la barra. La barra va fuera del `<form>` y el botón de guardar lo envía con `form="formulario-informe"`.
+  - **Lo que no cambia:** los errores de cada campo siguen junto a su campo.
+- **`frontend/src/index.css`:** estilos de `.barra-acciones` (`position: sticky; bottom: 0`, con el margen del área segura de los teléfonos). Una lista larga de requisitos tiene su propio desplazamiento (máx. 30 % de la pantalla).
+- **Pruebas:** 7 nuevas en `InformePage.test.jsx` ("InformePage: barra de acciones al pie"); total 175 del frontend. No se cambió ninguna prueba existente. Cypress (`npm run e2e`) se corrió con el cambio.
+
+**Por qué:** lo pidió el usuario. Quien trabajaba al final del informe (comentarios, firma) no veía el resultado de guardar ni los botones de finalizar y de PDF, y tenía que subir para saber qué había pasado.
+
 ### Descripción macroscópica editable (tarea 1 de las mejoras para los objetivos de investigación)
 
 **Qué se cambió:**

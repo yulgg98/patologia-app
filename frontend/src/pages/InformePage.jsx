@@ -613,73 +613,11 @@ export default function InformePage() {
         <div>
           <h1>{isEditing ? `Informe ${informe?.numero_peticion || ''}` : 'Nuevo Informe'}</h1>
           {informe && <EstadoBadge estado={informe.estado} />}
-          <IndicadorGuardado sinGuardar={hayCambiosSinGuardar} autoguardado={autoguardado} />
-        </div>
-        <div className="header-actions">
-          {isEditing && (
-            <>
-              {puedeVerPdf && (
-                <button className="btn btn-outline" onClick={downloadPDF}>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
-                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                    <polyline points="7,10 12,15 17,10" />
-                    <line x1="12" y1="15" x2="12" y2="3" />
-                  </svg>
-                  {borrador ? 'Vista previa (borrador)' : 'Exportar PDF'}
-                </button>
-              )}
-              {puedeEditar &&
-                informe?.estado === 'borrador' &&
-                (confirmFinalizar ? (
-                  <>
-                    {avisoSugeridoCambio && (
-                      <p className="aviso-finalizar">
-                        El texto sugerido cambió después de su edición de la descripción macroscópica: se finalizará con
-                        su versión.
-                      </p>
-                    )}
-                    <button className="btn btn-success" onClick={handleFinalizar}>
-                      Si, Confirmar
-                    </button>
-                    <button className="btn btn-outline btn-sm" onClick={() => setConfirmFinalizar(false)}>
-                      Cancelar
-                    </button>
-                  </>
-                ) : (
-                  <button className="btn btn-success" onClick={handleFinalizar}>
-                    Finalizar Informe
-                  </button>
-                ))}
-            </>
-          )}
         </div>
       </div>
 
-      {successMsg && <div className="alert alert-success">{successMsg}</div>}
-      {/* Los errores llevan role="alert": los lectores de pantalla los anuncian al aparecer. */}
-      {(errors.general || errors.detail) && (
-        <div className="alert alert-error" role="alert">
-          {errors.general || errors.detail}
-        </div>
-      )}
-      {/* Campos obligatorios de la plantilla que rechazó el backend: antes no se mostraban. */}
-      {typeof errors.datos_ingresados === 'string' && (
-        <div className="alert alert-error" role="alert">
-          {errors.datos_ingresados}
-        </div>
-      )}
-      {errors.requisitos && (
-        <div className="alert alert-error alert-lista" role="alert">
-          <p>No se puede finalizar el informe:</p>
-          <ul>
-            {errors.requisitos.map((requisito) => (
-              <li key={requisito}>{requisito}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit}>
+      {/* Los botones y los mensajes de resultado están en la barra fija del pie (al final). */}
+      <form id="formulario-informe" onSubmit={handleSubmit}>
         {/* Orden del informe real (informe v2, etapa 4): Paciente, Datos de la solicitud y Estudio */}
         <SelectorPaciente
           paciente={paciente}
@@ -873,17 +811,6 @@ export default function InformePage() {
         </div>
 
         <SeccionFirma firma={informe?.firma} estado={informe?.estado} fechaInforme={informe?.fecha_informe} />
-
-        {puedeEditar && informe?.estado !== 'finalizado' && (
-          <div className="form-actions">
-            <button type="button" className="btn btn-outline" onClick={() => navigate('/')}>
-              Cancelar
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? <span className="spinner"></span> : isEditing ? 'Actualizar Informe' : 'Guardar Informe'}
-            </button>
-          </div>
-        )}
       </form>
 
       {blocker.state === 'blocked' && (
@@ -921,11 +848,88 @@ export default function InformePage() {
           onAgregada={(adenda) => setInforme((prev) => ({ ...prev, adendas: [...(prev.adendas || []), adenda] }))}
         />
       )}
+
+      {/* Barra fija al pie (pedido del usuario, 2026-11-12): los botones y el resultado de cada
+          acción se ven sin tener que subir. Va fuera del <form>; el botón de guardar lo envía
+          con el atributo form. */}
+      <section className="barra-acciones" aria-label="Acciones del informe">
+        {successMsg && <div className="alert alert-success">{successMsg}</div>}
+        {/* Los errores llevan role="alert": los lectores de pantalla los anuncian al aparecer. */}
+        {(errors.general || errors.detail) && (
+          <div className="alert alert-error" role="alert">
+            {errors.general || errors.detail}
+          </div>
+        )}
+        {/* Campos obligatorios de la plantilla que rechazó el backend: antes no se mostraban. */}
+        {typeof errors.datos_ingresados === 'string' && (
+          <div className="alert alert-error" role="alert">
+            {errors.datos_ingresados}
+          </div>
+        )}
+        {errors.requisitos && (
+          <div className="alert alert-error alert-lista" role="alert">
+            <p>No se puede finalizar el informe:</p>
+            <ul>
+              {errors.requisitos.map((requisito) => (
+                <li key={requisito}>{requisito}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {confirmFinalizar && avisoSugeridoCambio && (
+          <p className="aviso-finalizar">
+            El texto sugerido cambió después de su edición de la descripción macroscópica: se finalizará con su versión.
+          </p>
+        )}
+
+        <div className="barra-acciones-fila">
+          <IndicadorGuardado sinGuardar={hayCambiosSinGuardar} autoguardado={autoguardado} />
+          <div className="barra-acciones-botones">
+            {puedeEditar && informe?.estado !== 'finalizado' && (
+              <button type="button" className="btn btn-outline" onClick={() => navigate('/')}>
+                Cancelar
+              </button>
+            )}
+            {isEditing && puedeVerPdf && (
+              <button type="button" className="btn btn-outline" onClick={downloadPDF}>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" width="16" height="16">
+                  <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                  <polyline points="7,10 12,15 17,10" />
+                  <line x1="12" y1="15" x2="12" y2="3" />
+                </svg>
+                {borrador ? 'Vista previa (borrador)' : 'Exportar PDF'}
+              </button>
+            )}
+            {puedeEditar && informe?.estado !== 'finalizado' && (
+              <button type="submit" form="formulario-informe" className="btn btn-primary" disabled={saving}>
+                {saving ? <span className="spinner"></span> : isEditing ? 'Actualizar Informe' : 'Guardar Informe'}
+              </button>
+            )}
+            {isEditing &&
+              puedeEditar &&
+              informe?.estado === 'borrador' &&
+              (confirmFinalizar ? (
+                <>
+                  <button type="button" className="btn btn-success" onClick={handleFinalizar}>
+                    Si, Confirmar
+                  </button>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={() => setConfirmFinalizar(false)}>
+                    Cancelar
+                  </button>
+                </>
+              ) : (
+                <button type="button" className="btn btn-success" onClick={handleFinalizar}>
+                  Finalizar Informe
+                </button>
+              ))}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
 
-// Estado del guardado junto al título (D-13). aria-live: los lectores de pantalla lo anuncian.
+// Estado del guardado, en la barra del pie (D-13). aria-live: los lectores de pantalla lo anuncian.
 function IndicadorGuardado({ sinGuardar, autoguardado }) {
   let texto = null;
   if (autoguardado?.tipo === 'guardando') texto = 'Guardando…';
